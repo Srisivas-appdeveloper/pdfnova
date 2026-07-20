@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_merge_short">Merge PDF</string>
+    <string name="shortcut_merge_long">Merge multiple PDFs into one</string>
+    <string name="shortcut_scan_short">Scan Document</string>
+    <string name="shortcut_scan_long">Scan physical documents to PDF</string>
+    <string name="shortcut_notes_short">Quick Notes</string>
+    <string name="shortcut_notes_long">Write and save PDF notes</string>
+    <string name="shortcut_word_short">PDF to Word</string>
+    <string name="shortcut_word_long">Convert PDF to editable Word document</string>
+</resources>

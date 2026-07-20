@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121729"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="PDF Nova Quick"
+        android:textColor="#37D3E8"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="6dp" />
+
+    <GridLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:columnCount="2"
+        android:rowCount="2">
+
+        <Button
+            android:id="@+id/btn_w2_scan"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_columnWeight="1"
+            android:layout_rowWeight="1"
+            android:text="📷 Scan"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:background="#1C243B"
+            android:layout_margin="2dp" />
+
+        <Button
+            android:id="@+id/btn_w2_notes"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_columnWeight="1"
+            android:layout_rowWeight="1"
+            android:text="📝 Notes"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:background="#1C243B"
+            android:layout_margin="2dp" />
+
+        <Button
+            android:id="@+id/btn_w2_merge"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_columnWeight="1"
+            android:layout_rowWeight="1"
+            android:text="📄 Merge"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:background="#1C243B"
+            android:layout_margin="2dp" />
+
+        <Button
+            android:id="@+id/btn_w2_word"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_columnWeight="1"
+            android:layout_rowWeight="1"
+            android:text="📘 Word"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:background="#1C243B"
+            android:layout_margin="2dp" />
+
+    </GridLayout>
+</LinearLayout>

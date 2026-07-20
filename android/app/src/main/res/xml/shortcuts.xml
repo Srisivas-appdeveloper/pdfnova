@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="merge"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_merge_short"
+        android:shortcutLongLabel="@string/shortcut_merge_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kalainova.pdf"
+            android:targetClass="com.kalainova.pdf.MainActivity">
+            <extra android:name="toolId" android:value="merge" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="scan"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_scan_short"
+        android:shortcutLongLabel="@string/shortcut_scan_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kalainova.pdf"
+            android:targetClass="com.kalainova.pdf.MainActivity">
+            <extra android:name="toolId" android:value="scan" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="notes"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_notes_short"
+        android:shortcutLongLabel="@string/shortcut_notes_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kalainova.pdf"
+            android:targetClass="com.kalainova.pdf.MainActivity">
+            <extra android:name="toolId" android:value="notes" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="pdfToWord"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_word_short"
+        android:shortcutLongLabel="@string/shortcut_word_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kalainova.pdf"
+            android:targetClass="com.kalainova.pdf.MainActivity">
+            <extra android:name="toolId" android:value="pdfToWord" />
+        </intent>
+    </shortcut>
+</shortcuts>

@@ -1,0 +1,58 @@
+name: pdfnova
+description: PDF Nova - Fully offline PDF toolkit. Merge, split, compress, unlock (Aadhaar), protect and convert - beautiful glass UI, zero uploads.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_bloc: ^8.1.6
+  equatable: ^2.0.5
+
+  # PDF engine (free Community License - offline, pure Dart)
+  syncfusion_flutter_pdf: ^28.1.33
+
+  # Local storage
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.4
+
+  # Files
+  file_picker: ^8.1.2
+  share_plus: ^10.0.2
+  open_filex: ^4.5.0
+  image_picker: ^1.1.2
+
+  # Rendering & imaging (page thumbnails, PDF->images, target-size compress)
+  pdfx: ^2.8.0
+  image: ^4.2.0
+  archive: ^3.6.1  # pure Dart ZIP r/w — used to build DOCX & PPTX offline
+
+  # Phase 3: on-device intelligence (Android; gated at runtime)
+  google_mlkit_document_scanner: ^0.2.1
+  google_mlkit_text_recognition: ^0.13.1
+
+  # Phase 4
+  signature: ^5.5.0
+  local_auth: ^2.3.0
+  flutter_tts: ^4.0.2
+  qr_flutter: ^4.1.0
+
+  # UI / motion
+  flutter_animate: ^4.5.0
+  animations: ^2.0.11
+  confetti: ^0.7.0
+  google_fonts: ^6.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

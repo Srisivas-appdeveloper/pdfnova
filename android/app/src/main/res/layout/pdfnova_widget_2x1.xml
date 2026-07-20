@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121729"
+    android:orientation="horizontal"
+    android:padding="8dp"
+    android:gravity="center_vertical">
+
+    <Button
+        android:id="@+id/btn_w1_scan"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:text="📷 Quick Scan"
+        android:textColor="#FFFFFF"
+        android:textSize="11sp"
+        android:background="#1C243B"
+        android:layout_marginEnd="6dp" />
+
+    <Button
+        android:id="@+id/btn_w1_notes"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:text="📝 New Note"
+        android:textColor="#FFFFFF"
+        android:textSize="11sp"
+        android:background="#1C243B" />
+
+</LinearLayout>
