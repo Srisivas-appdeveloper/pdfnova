@@ -78,6 +78,8 @@ lib/generated_plugin_registrant.dart
 #  macOS system files
 # ─────────────────────────────────────────────
 .DS_Store
+# AppleDouble metadata macOS writes on exFAT/FAT drives (e.g. PortableSSD)
+._*
 .AppleDouble
 .LSOverride
 

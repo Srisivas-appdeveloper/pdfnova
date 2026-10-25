@@ -46,8 +46,6 @@ dependencies:
   # UI / motion
   flutter_animate: ^4.5.0
   animations: ^2.0.11
-  confetti: ^0.7.0
-  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_test:
@@ -56,3 +54,26 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/images/nova_art_light.jpg
+    - assets/images/nova_art_dark.jpg
+    - assets/fonts/OFL-Inter.txt
+    - assets/fonts/OFL-InstrumentSerif.txt
+
+  # Bundled so typography works offline (SIL Open Font License).
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+    - family: InstrumentSerif
+      fonts:
+        - asset: assets/fonts/InstrumentSerif-Regular.ttf
+        - asset: assets/fonts/InstrumentSerif-Italic.ttf
+          style: italic

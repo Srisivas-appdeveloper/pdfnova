@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 import '../../core/theme/app_colors.dart';
-import '../../core/widgets/glass_card.dart';
-import '../../core/widgets/gradient_background.dart';
+import '../../core/widgets/nova_button.dart';
+import '../../core/widgets/nova_card.dart';
+import '../../core/widgets/nova_entrance.dart';
 import '../../services/file_service.dart';
 import '../../services/storage_service.dart';
 import '../home/tools.dart';
@@ -139,98 +140,76 @@ class _NotesScreenState extends State<NotesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return GradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
-            onPressed: () => Navigator.pop(context),
-          ),
-          title: Row(
-            children: [
-              const Icon(Icons.note_alt_rounded, color: AppColors.cyan, size: 22),
-              const SizedBox(width: 8),
-              Text(widget.tool.title,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ],
-          ),
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: ElevatedButton.icon(
+    final c = context.nova;
+    final t = Theme.of(context).textTheme;
+    final now = DateTime.now();
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
+      'Sep', 'Oct', 'Nov', 'Dec'];
+    return Scaffold(
+      backgroundColor: c.canvas,
+      appBar: AppBar(
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: SizedBox(
+              height: 44,
+              child: NovaButton(
+                expanded: false,
+                label: _saving ? 'Saving…' : 'Save PDF',
+                icon: Icons.picture_as_pdf_outlined,
                 onPressed: _saving ? null : _exportNoteToPdf,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.picture_as_pdf_rounded, size: 18),
-                label: Text(_saving ? 'Saving...' : 'Save PDF'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.violet,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 2,
-                ),
               ),
             ),
-          ],
-        ),
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                // Note Title Field
-                GlassCard(
-                  radius: 16,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: TextField(
-                    controller: _titleController,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Note Title (e.g. Meeting Minutes)',
-                      hintStyle: TextStyle(color: AppColors.textLow, fontSize: 18),
-                      border: InputBorder.none,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Note Body Text Editor
-                Expanded(
-                  child: GlassCard(
-                    radius: 20,
-                    padding: const EdgeInsets.all(16),
-                    child: TextField(
-                      controller: _bodyController,
-                      maxLines: null,
-                      expands: true,
-                      textAlignVertical: TextAlignVertical.top,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        height: 1.5,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: 'Start typing your notes here...\n\nYour notes will be saved into the Notes folder and can be exported as PDF instantly.',
-                        hintStyle: TextStyle(color: AppColors.textLow, fontSize: 14),
-                        border: InputBorder.none,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
+        ],
+      ),
+      body: Padding(
+        padding: EdgeInsets.fromLTRB(
+            20, 0, 20, 16 + MediaQuery.paddingOf(context).bottom),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: TextField(
+                controller: _titleController,
+                style: t.headlineLarge,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  hintText: 'Untitled note',
+                  hintStyle: t.headlineLarge?.copyWith(color: c.inkLow),
+                  border: InputBorder.none,
+                  isDense: true,
+                ),
+              ),
+            ).enter(context, delayMs: 120),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 6, 4, 16),
+              child: Text(
+                '${now.day} ${months[now.month - 1]} ${now.year} · saved as a PDF in Files › Notes',
+                style: t.bodySmall,
+              ),
+            ).enter(context, delayMs: 180),
+            Expanded(
+              child: NovaCard(
+                radius: 22,
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                child: TextField(
+                  controller: _bodyController,
+                  maxLines: null,
+                  expands: true,
+                  textAlignVertical: TextAlignVertical.top,
+                  textCapitalization: TextCapitalization.sentences,
+                  style: t.bodyLarge?.copyWith(height: 1.6),
+                  decoration: InputDecoration(
+                    hintText: 'Start writing…',
+                    hintStyle: t.bodyLarge?.copyWith(color: c.inkLow),
+                    border: InputBorder.none,
+                  ),
+                ),
+              ).enter(context, delayMs: 240),
+            ),
+          ],
         ),
       ),
     );

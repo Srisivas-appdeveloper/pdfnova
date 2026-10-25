@@ -5,8 +5,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../core/theme/app_colors.dart';
-import '../../core/widgets/glass_button.dart';
-import '../../core/widgets/gradient_background.dart';
+import '../../core/theme/app_motion.dart';
+import '../../core/widgets/nova_button.dart';
+import '../../core/widgets/nova_controls.dart';
+import '../../core/widgets/nova_entrance.dart';
 import '../home/tools.dart';
 import '../tool/tool_bloc.dart';
 import '../tool/processing_view.dart';
@@ -75,61 +77,72 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.nova;
+    final t = Theme.of(context).textTheme;
     return BlocProvider.value(
       value: _bloc,
-      child: GradientBackground(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(title: Text(widget.tool.title)),
-          body: BlocConsumer<ToolBloc, ToolState>(
-            listener: (context, state) {
-              // Cancel returns [] → ToolIdle; failures land here too. Either
-              // way the user ends on a retry screen, not a stuck fake spinner
-              // or a silent pop.
-              if (state is ToolFailure) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(SnackBar(content: Text(state.message)));
-                setState(() => _cancelled = true);
-              }
-              if (state is ToolIdle) setState(() => _cancelled = true);
-            },
-            builder: (context, state) {
-              if (state is ToolSuccess) return SuccessView(paths: state.paths);
-              if (_cancelled) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.document_scanner_rounded,
-                          size: 64, color: AppColors.textLow),
-                      const SizedBox(height: 16),
-                      Text('Scan cancelled',
-                          style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 6),
-                      Text('No pages were captured.',
-                          style: Theme.of(context).textTheme.bodyMedium),
-                      const SizedBox(height: 24),
-                      AuroraButton(
-                        label: 'Try again',
-                        icon: Icons.refresh_rounded,
-                        expanded: false,
-                        onPressed: () {
-                          setState(() => _cancelled = false);
-                          _scan();
-                        },
-                      ),
-                    ]),
-                  ),
-                );
-              }
+      child: Scaffold(
+        backgroundColor: c.canvas,
+        appBar: AppBar(),
+        body: BlocConsumer<ToolBloc, ToolState>(
+          listener: (context, state) {
+            // Cancel returns [] → ToolIdle; failures land here too. Either
+            // way the user ends on a retry screen, not a stuck fake spinner
+            // or a silent pop.
+            if (state is ToolFailure) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(state.message)));
+              setState(() => _cancelled = true);
+            }
+            if (state is ToolIdle) setState(() => _cancelled = true);
+          },
+          builder: (context, state) {
+            final Widget stage;
+            if (state is ToolSuccess) {
+              stage = SuccessView(key: const ValueKey('s'), paths: state.paths);
+            } else if (_cancelled) {
+              stage = Center(
+                key: const ValueKey('c'),
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    NovaIconTile(
+                        icon: Icons.document_scanner_outlined,
+                        fg: c.inkMid,
+                        bg: c.surfaceAlt,
+                        size: 72),
+                    const SizedBox(height: 20),
+                    Text('Scan cancelled', style: t.headlineMedium),
+                    const SizedBox(height: 6),
+                    Text('No pages were captured.', style: t.bodyMedium),
+                    const SizedBox(height: 26),
+                    NovaButton(
+                      label: 'Try again',
+                      icon: Icons.refresh_rounded,
+                      expanded: false,
+                      onPressed: () {
+                        setState(() => _cancelled = false);
+                        _scan();
+                      },
+                    ),
+                  ]).enter(context),
+                ),
+              );
+            } else {
               // While the scanner UI is open the ramp keeps moving; once the
               // PDF is being copied the real progress shows.
-              return ProcessingView(
+              stage = ProcessingView(
+                key: const ValueKey('p'),
                 progress: state is ToolProcessing ? state.progress : 0.0,
                 label: 'Scanner open — capture your pages',
               );
-            },
-          ),
+            }
+            return AnimatedSwitcher(
+              duration: NovaMotion.page,
+              switchInCurve: NovaMotion.emphasized,
+              child: stage,
+            );
+          },
         ),
       ),
     );

@@ -1,20 +1,21 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/theme/app_colors.dart';
-import '../../core/widgets/glass_card.dart';
-import '../../core/widgets/glass_button.dart';
-import '../../core/widgets/gradient_background.dart';
+import '../../core/theme/app_motion.dart';
+import '../../core/widgets/nova_button.dart';
+import '../../core/widgets/nova_card.dart';
+import '../../core/widgets/nova_entrance.dart';
 import '../../services/file_service.dart';
 import '../../services/pdf_service.dart';
 import '../../services/raster_service.dart';
 import '../home/tools.dart';
+import '../tool/pick_zone.dart';
 import '../tool/tool_bloc.dart';
-import '../tool/processing_view.dart';
-import '../tool/success_view.dart';
+import '../tool/tool_header.dart';
+import '../tool/tool_stages.dart';
 
-/// Pages tool: long-press-drag to reorder, tap rotate, swipe-style delete.
+/// Pages tool: long-press-drag to reorder, tap rotate, tap delete.
 /// Thumbnails render once via PDFium then the list is pure state.
 class OrganizeScreen extends StatelessWidget {
   const OrganizeScreen({super.key, required this.tool});
@@ -24,32 +25,20 @@ class OrganizeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => ToolBloc(),
-      child: GradientBackground(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(title: Text(tool.title)),
-          body: BlocConsumer<ToolBloc, ToolState>(
-            listener: (context, state) {
-              if (state is ToolFailure) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(SnackBar(content: Text(state.message)));
-              }
-            },
-            builder: (context, state) => PopScope(
-              canPop: state is! ToolProcessing,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 350),
-                child: switch (state) {
-                  ToolProcessing s => ProcessingView(
-                      key: const ValueKey('p'),
-                      progress: s.progress,
-                      label: 'Rebuilding your PDF'),
-                  ToolSuccess s =>
-                    SuccessView(key: const ValueKey('s'), paths: s.paths),
-                  _ => _Editor(key: const ValueKey('e'), tool: tool),
-                },
-              ),
-            ),
+      child: Scaffold(
+        backgroundColor: context.nova.canvas,
+        appBar: AppBar(),
+        body: BlocConsumer<ToolBloc, ToolState>(
+          listener: (context, state) {
+            if (state is ToolFailure) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(state.message)));
+            }
+          },
+          builder: (context, state) => ToolStages(
+            state: state,
+            processingLabel: 'Rebuilding your PDF',
+            input: _Editor(tool: tool),
           ),
         ),
       ),
@@ -65,7 +54,7 @@ class _PageItem {
 }
 
 class _Editor extends StatefulWidget {
-  const _Editor({super.key, required this.tool});
+  const _Editor({required this.tool});
   final Tool tool;
 
   @override
@@ -115,48 +104,52 @@ class _EditorState extends State<_Editor> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    final c = context.nova;
+    final t = Theme.of(context).textTheme;
     if (_pages == null) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Center(
-          child: GlassCard(
-            frosted: true,
-            strong: true,
-            onTap: _pick,
-            padding:
-                const EdgeInsets.symmetric(vertical: 40, horizontal: 32),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                    gradient: AppColors.aurora,
-                    borderRadius: BorderRadius.circular(20)),
-                child: const Icon(Icons.grid_view_rounded,
-                    color: Colors.white, size: 30),
-              ),
-              const SizedBox(height: 16),
-              Text('Choose PDF',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 4),
-              Text('Then drag to reorder, tap to rotate',
-                  style: Theme.of(context).textTheme.bodyMedium),
-            ]),
-          ).animate().fadeIn().slideY(begin: 0.15),
-        ),
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+        children: [
+          ToolHeader(tool: widget.tool),
+          PickZone(
+            icon: Icons.grid_view_rounded,
+            title: _loading ? 'Reading pages…' : 'Choose a PDF',
+            hint: 'Then drag to reorder, tap to rotate or delete',
+            onTap: _loading ? null : _pick,
+          ).enter(context, delayMs: 200),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.only(top: 24),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+        ],
       );
     }
     return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+        child: Row(children: [
+          Text('${_pages!.length} pages', style: t.headlineMedium),
+          const Spacer(),
+          Text('Hold & drag to reorder', style: t.bodySmall),
+        ]).enter(context),
+      ),
       Expanded(
         child: ReorderableListView.builder(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
           itemCount: _pages!.length,
           proxyDecorator: (child, _, anim) => AnimatedBuilder(
             animation: anim,
-            builder: (_, __) => Transform.scale(scale: 1.04, child: child),
+            builder: (_, __) => Transform.scale(
+              scale: 1 + 0.04 * Curves.easeOut.transform(anim.value),
+              child: Material(
+                color: Colors.transparent,
+                elevation: 8 * anim.value,
+                shadowColor: Colors.black26,
+                borderRadius: BorderRadius.circular(18),
+                child: child,
+              ),
+            ),
           ),
           onReorder: (from, to) => setState(() {
             if (to > from) to--;
@@ -167,46 +160,71 @@ class _EditorState extends State<_Editor> {
             final p = _pages![i];
             return Padding(
               key: ValueKey(p.sourceIndex),
-              padding: const EdgeInsets.only(bottom: 12),
-              child: GlassCard(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: NovaCard(
                 radius: 18,
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
                 child: Row(children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: RotatedBox(
-                      quarterTurns: p.quarterTurns,
-                      child: Image.memory(p.thumb,
-                          width: 54, height: 74, fit: BoxFit.cover),
+                  Container(
+                    width: 64,
+                    height: 76,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: c.surfaceAlt,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: AnimatedRotation(
+                      turns: p.quarterTurns / 4,
+                      duration: NovaMotion.medium,
+                      curve: NovaMotion.emphasized,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: Image.memory(p.thumb,
+                            width: 50, height: 66, fit: BoxFit.contain),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
-                      child: Text('Page ${p.sourceIndex + 1}',
-                          style: Theme.of(context).textTheme.bodyLarge)),
-                  IconButton(
-                    icon: const Icon(Icons.rotate_90_degrees_cw_rounded,
-                        color: AppColors.cyan, size: 22),
-                    onPressed: () =>
-                        setState(() => p.quarterTurns = (p.quarterTurns + 1) % 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Page ${p.sourceIndex + 1}', style: t.titleSmall),
+                        if (p.quarterTurns % 4 != 0)
+                          Text('Rotated ${(p.quarterTurns % 4) * 90}°',
+                              style: t.bodySmall?.copyWith(color: c.accent)),
+                      ],
+                    ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded,
-                        color: AppColors.danger, size: 22),
+                    tooltip: 'Rotate',
+                    icon: Icon(Icons.rotate_90_degrees_cw_outlined,
+                        color: c.inkMid, size: 22),
+                    onPressed: () => setState(() => p.quarterTurns++),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete page',
+                    icon: Icon(Icons.delete_outline_rounded,
+                        color: c.danger, size: 22),
                     onPressed: () => setState(() => _pages!.removeAt(i)),
                   ),
-                  Icon(Icons.drag_handle_rounded, color: AppColors.textLow),
+                  ReorderableDragStartListener(
+                    index: i,
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Icon(Icons.drag_indicator_rounded, color: c.inkLow),
+                    ),
+                  ),
                 ]),
-              ),
+              ).enter(context, index: i),
             );
           },
         ),
       ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
-        child: AuroraButton(
+      ToolActionBar(
+        child: NovaButton(
           label: 'Apply changes',
-          icon: Icons.bolt_rounded,
+          icon: Icons.arrow_forward_rounded,
           onPressed: (_pages?.isEmpty != false) ? null : _apply,
         ),
       ),

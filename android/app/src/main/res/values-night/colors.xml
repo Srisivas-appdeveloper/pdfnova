@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches NovaColors.dark.canvas -->
+    <color name="nova_canvas">#101012</color>
+</resources>

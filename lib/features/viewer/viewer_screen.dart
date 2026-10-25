@@ -5,8 +5,12 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:pdfx/pdfx.dart' as px;
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 import '../../core/theme/app_colors.dart';
-import '../../core/widgets/glass_card.dart';
-import '../../core/widgets/gradient_background.dart';
+import '../../core/theme/app_motion.dart';
+import '../../core/widgets/nova_controls.dart';
+import '../../core/widgets/nova_dialog.dart';
+import '../../core/widgets/nova_entrance.dart';
+import '../tool/pick_zone.dart';
+import '../tool/tool_header.dart';
 import '../../services/file_service.dart';
 import '../../services/ocr_service.dart';
 import '../home/tools.dart';
@@ -208,155 +212,169 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 
   void _showSettingsSheet() {
-    showModalBottomSheet(
+    showNovaSheet(
       context: context,
-      backgroundColor: Colors.transparent,
       builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => GlassCard(
-          radius: 24,
-          strong: true,
-          padding: const EdgeInsets.all(24),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Voice & Language Settings',
-                        style: Theme.of(context).textTheme.titleLarge),
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Text('Language / accent',
-                    style: Theme.of(context).textTheme.bodyMedium),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: AppColors.glassFill,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.glassBorder),
+        builder: (context, setSheetState) {
+          final c = context.nova;
+          final t = Theme.of(context).textTheme;
+          return SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Voice', style: t.headlineMedium),
+                  const SizedBox(height: 18),
+                  Text('Language', style: t.labelMedium),
+                  const SizedBox(height: 10),
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    for (final e in _languages.entries)
+                      NovaChip(
+                        label: e.key,
+                        selected: (_selectedLanguageCode ?? 'auto') == e.value,
+                        onTap: () {
+                          setState(() => _selectedLanguageCode =
+                              e.value == 'auto' ? null : e.value);
+                          setSheetState(() {});
+                          _applyVoiceSettingsAndRestart();
+                        },
+                      ),
+                  ]),
+                  const SizedBox(height: 24),
+                  Row(children: [
+                    Text('Reading speed', style: t.labelMedium),
+                    const Spacer(),
+                    Text('${(_speechRate * 2.2).toStringAsFixed(1)}×',
+                        style: t.titleMedium?.copyWith(color: c.accent)),
+                  ]),
+                  Slider(
+                    value: _speechRate,
+                    min: 0.3,
+                    max: 0.7,
+                    onChanged: (val) {
+                      setState(() => _speechRate = val);
+                      setSheetState(() {});
+                      _tts.setSpeechRate(val);
+                    },
                   ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: _selectedLanguageCode ?? 'auto',
-                      isExpanded: true,
-                      dropdownColor: const Color(0xFF1E1E2E),
-                      style: const TextStyle(color: Colors.white, fontSize: 15),
-                      items: _languages.entries
-                          .map((e) => DropdownMenuItem(
-                                value: e.value,
-                                child: Text(e.key),
-                              ))
-                          .toList(),
-                      onChanged: (val) {
-                        setState(() => _selectedLanguageCode = val == 'auto' ? null : val);
-                        setSheetState(() {});
-                        _applyVoiceSettingsAndRestart();
-                      },
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Reading Speed',
-                        style: Theme.of(context).textTheme.bodyMedium),
-                    Text('${(_speechRate * 2.2).toStringAsFixed(1)}x',
-                        style: const TextStyle(color: AppColors.cyan, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                Slider(
-                  value: _speechRate,
-                  min: 0.3,
-                  max: 0.7,
-                  activeColor: AppColors.cyan,
-                  onChanged: (val) {
-                    setState(() => _speechRate = val);
-                    setSheetState(() {});
-                    _tts.setSpeechRate(val);
-                  },
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
 
+  static const _identity = <double>[
+    1, 0, 0, 0, 0, //
+    0, 1, 0, 0, 0, //
+    0, 0, 1, 0, 0, //
+    0, 0, 0, 1, 0,
+  ];
+  static const _invert = <double>[
+    -1, 0, 0, 0, 255, //
+    0, -1, 0, 0, 255, //
+    0, 0, -1, 0, 255, //
+    0, 0, 0, 1, 0,
+  ];
+
   @override
   Widget build(BuildContext context) {
-    return GradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(widget.tool.title),
-          actions: [
-            if (_controller != null) ...[
-              IconButton(
-                icon: Icon(
-                    _speaking
-                        ? Icons.stop_circle_outlined
-                        : Icons.volume_up_rounded,
-                    color: AppColors.cyan),
-                onPressed: _toggleSpeak,
-              ),
-              IconButton(
-                icon: const Icon(Icons.tune_rounded, color: AppColors.cyan),
-                onPressed: _showSettingsSheet,
-              ),
-              IconButton(
-                icon: Icon(
-                    _night
-                        ? Icons.light_mode_rounded
-                        : Icons.dark_mode_rounded,
-                    color: AppColors.cyan),
-                onPressed: () => setState(() => _night = !_night),
-              ),
-            ],
-          ],
-        ),
-        body: _controller == null
-            ? Center(
-                child: GlassCard(
-                  frosted: true,
-                  strong: true,
-                  onTap: _pick,
-                  padding: const EdgeInsets.symmetric(
-                      vertical: 40, horizontal: 40),
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.menu_book_rounded,
-                        color: AppColors.cyan, size: 40),
-                    const SizedBox(height: 12),
-                    Text('Open a PDF',
-                        style: Theme.of(context).textTheme.titleMedium),
-                  ]),
-                ),
-              )
-            : ColorFiltered(
-                colorFilter: _night
-                    ? const ColorFilter.matrix([
-                        -1, 0, 0, 0, 255, //
-                        0, -1, 0, 0, 255, //
-                        0, 0, -1, 0, 255, //
-                        0, 0, 0, 1, 0,
-                      ])
-                    : const ColorFilter.mode(
-                        Colors.transparent, BlendMode.dst),
-                child: px.PdfViewPinch(
-                  controller: _controller!,
-                  onPageChanged: (p) => _page = p,
-                ),
-              ),
+    final c = context.nova;
+    final t = Theme.of(context).textTheme;
+    final pages = _controller?.pagesCount;
+    return Scaffold(
+      backgroundColor: _controller == null ? c.canvas : c.surfaceAlt,
+      appBar: AppBar(
+        backgroundColor: _controller == null ? c.canvas : c.surfaceAlt,
+        title: _controller == null ? null : Text(widget.tool.title),
       ),
+      body: _controller == null
+          ? ListView(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+              children: [
+                ToolHeader(tool: widget.tool),
+                PickZone(
+                  icon: Icons.menu_book_outlined,
+                  title: 'Open a PDF',
+                  hint: 'Pinch to zoom · night mode · read aloud',
+                  onTap: _pick,
+                ).enter(context, delayMs: 200),
+              ],
+            )
+          : Stack(children: [
+              // Night mode eases between normal and inverted colours.
+              Positioned.fill(
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween(end: _night ? 1 : 0),
+                  duration: NovaMotion.page,
+                  curve: NovaMotion.emphasized,
+                  builder: (_, v, child) => ColorFiltered(
+                    colorFilter: ColorFilter.matrix([
+                      for (var i = 0; i < 20; i++)
+                        _identity[i] + (_invert[i] - _identity[i]) * v,
+                    ]),
+                    child: child,
+                  ),
+                  child: px.PdfViewPinch(
+                    controller: _controller!,
+                    onPageChanged: (p) => setState(() => _page = p),
+                    onDocumentLoaded: (_) => setState(() {}),
+                  ),
+                ),
+              ),
+              // Floating control pill.
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 20 + MediaQuery.paddingOf(context).bottom,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(18, 6, 6, 6),
+                    decoration: BoxDecoration(
+                      color: c.surface,
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(color: c.border),
+                      boxShadow: [
+                        BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.12),
+                            blurRadius: 24,
+                            offset: const Offset(0, 8)),
+                      ],
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text(pages == null ? '$_page' : '$_page / $pages',
+                          style: t.labelLarge),
+                      const SizedBox(width: 10),
+                      NovaIconButton(
+                        tooltip: _speaking ? 'Stop reading' : 'Read aloud',
+                        icon: _speaking
+                            ? Icons.stop_rounded
+                            : Icons.volume_up_outlined,
+                        active: _speaking,
+                        onPressed: _toggleSpeak,
+                      ),
+                      NovaIconButton(
+                        tooltip: 'Voice settings',
+                        icon: Icons.tune_rounded,
+                        onPressed: _showSettingsSheet,
+                      ),
+                      NovaIconButton(
+                        tooltip: _night ? 'Day mode' : 'Night mode',
+                        icon: _night
+                            ? Icons.light_mode_outlined
+                            : Icons.dark_mode_outlined,
+                        active: _night,
+                        onPressed: () => setState(() => _night = !_night),
+                      ),
+                    ]),
+                  ),
+                ).enter(context, delayMs: 300),
+              ),
+            ]),
     );
   }
 }

@@ -2,17 +2,19 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/theme/app_colors.dart';
-import '../../core/widgets/glass_card.dart';
-import '../../core/widgets/glass_button.dart';
-import '../../core/widgets/gradient_background.dart';
+import '../../core/widgets/nova_button.dart';
+import '../../core/widgets/nova_card.dart';
+import '../../core/widgets/nova_controls.dart';
+import '../../core/widgets/nova_entrance.dart';
 import '../../services/file_service.dart';
 import '../../services/pdf_service.dart';
 import '../home/tools.dart';
+import '../tool/pick_zone.dart';
 import '../tool/tool_bloc.dart';
-import '../tool/processing_view.dart';
-import '../tool/success_view.dart';
+import '../tool/tool_header.dart';
+import '../tool/tool_stages.dart';
 
-/// Fill form: lists every text field in the PDF's AcroForm, one glass input
+/// Fill form: lists every text field in the PDF's AcroForm, one input
 /// each, optional flatten so the result can't be edited afterwards.
 class FormFillScreen extends StatelessWidget {
   const FormFillScreen({super.key, required this.tool});
@@ -22,26 +24,20 @@ class FormFillScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => ToolBloc(),
-      child: GradientBackground(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(title: Text(tool.title)),
-          body: BlocConsumer<ToolBloc, ToolState>(
-            listener: (context, state) {
-              if (state is ToolFailure) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(SnackBar(content: Text(state.message)));
-              }
-            },
-            builder: (context, state) => PopScope(
-              canPop: state is! ToolProcessing,
-              child: switch (state) {
-                ToolProcessing s =>
-                  ProcessingView(progress: s.progress, label: 'Filling the form'),
-                ToolSuccess s => SuccessView(paths: s.paths),
-                _ => _FormFlow(tool: tool),
-              },
-            ),
+      child: Scaffold(
+        backgroundColor: context.nova.canvas,
+        appBar: AppBar(),
+        body: BlocConsumer<ToolBloc, ToolState>(
+          listener: (context, state) {
+            if (state is ToolFailure) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(state.message)));
+            }
+          },
+          builder: (context, state) => ToolStages(
+            state: state,
+            processingLabel: 'Filling the form',
+            input: _FormFlow(tool: tool),
           ),
         ),
       ),
@@ -100,70 +96,60 @@ class _FormFlowState extends State<_FormFlow> {
 
   @override
   Widget build(BuildContext context) {
-    if (_fields == null || _fields!.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            GlassCard(
-              frosted: true,
-              strong: true,
+    final t = Theme.of(context).textTheme;
+    final hasFields = _fields != null && _fields!.isNotEmpty;
+    return Column(children: [
+      Expanded(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          physics: const BouncingScrollPhysics(),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          children: [
+            ToolHeader(tool: widget.tool),
+            PickZone(
+              icon: Icons.edit_note_rounded,
+              title: hasFields
+                  ? '${_fields!.length} fields found · tap to change'
+                  : 'Choose a form PDF',
+              hint: 'PDFs with fillable fields (AcroForm)',
+              done: hasFields,
               onTap: _pick,
-              padding:
-                  const EdgeInsets.symmetric(vertical: 40, horizontal: 40),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.edit_note_rounded,
-                    color: AppColors.cyan, size: 40),
-                const SizedBox(height: 12),
-                Text('Choose a form PDF',
-                    style: Theme.of(context).textTheme.titleMedium),
-              ]),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 16),
-              Text(_error!,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium),
+            ).enter(context, delayMs: 200),
+            if (_error != null)
+              ToolNote(_error!, icon: Icons.error_outline_rounded),
+            if (hasFields) ...[
+              const SizedBox(height: 22),
+              for (final (n, (i, name, _)) in _fields!.indexed)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: NovaField(
+                    controller: _controllers[i]!,
+                    label: name,
+                    hint: 'Type here',
+                  ).enter(context, index: n),
+                ),
+              NovaCard(
+                padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+                child: SwitchListTile.adaptive(
+                  value: _flatten,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Lock after filling', style: t.titleMedium),
+                  subtitle: Text('Fields become permanent print, not editable',
+                      style: t.bodySmall),
+                  onChanged: (v) => setState(() => _flatten = v),
+                ),
+              ),
             ],
-          ]),
+          ],
         ),
-      );
-    }
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-      children: [
-        for (final (i, name, _) in _fields!) ...[
-          Text(name,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(fontSize: 13)),
-          const SizedBox(height: 6),
-          GlassCard(
-            radius: 16,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: TextField(
-              controller: _controllers[i],
-              style: Theme.of(context).textTheme.bodyLarge,
-              decoration: const InputDecoration(border: InputBorder.none),
-            ),
-          ),
-          const SizedBox(height: 14),
-        ],
-        SwitchListTile(
-          value: _flatten,
-          activeColor: AppColors.violet,
-          contentPadding: EdgeInsets.zero,
-          title: Text('Lock after filling',
-              style: Theme.of(context).textTheme.bodyLarge),
-          subtitle: Text('Fields become permanent print, not editable',
-              style: Theme.of(context).textTheme.bodyMedium),
-          onChanged: (v) => setState(() => _flatten = v),
+      ),
+      if (hasFields)
+        ToolActionBar(
+          child: NovaButton(
+              label: 'Fill & save',
+              icon: Icons.arrow_forward_rounded,
+              onPressed: _fill),
         ),
-        const SizedBox(height: 12),
-        AuroraButton(
-            label: 'Fill & save', icon: Icons.bolt_rounded, onPressed: _fill),
-      ],
-    );
+    ]);
   }
 }

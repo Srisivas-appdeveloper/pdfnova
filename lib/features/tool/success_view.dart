@@ -1,66 +1,27 @@
-import 'dart:io';
-import 'dart:math' as math;
-import 'package:confetti/confetti.dart';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_motion.dart';
 import '../../core/utils/file_open.dart';
-import '../../core/widgets/glass_card.dart';
-import '../../core/widgets/glass_button.dart';
-// ADS DISABLED FOR RELEASE — re-enable: uncomment below + the rewarded gate in _withAd
-// import '../../services/ad_service.dart';
+import '../../core/widgets/nova_button.dart';
+import '../../core/widgets/nova_card.dart';
+import '../../core/widgets/nova_controls.dart';
+import '../../core/widgets/nova_entrance.dart';
 import '../../services/file_service.dart';
+import '../files/file_row.dart';
+// ADS DISABLED FOR RELEASE — re-enable: import ad_service.dart and route the
+// actions in _withAd through AdService.instance.showRewardedThen.
 
-/// Confetti + file card(s). Handles one output (open directly) or many
-/// (batch / PDF→images: list + share-all). Save/Share runs through one
-/// declared rewarded ad with a guaranteed no-fill fallback.
-class SuccessView extends StatefulWidget {
+/// Result screen: a check mark that draws itself inside an expanding ring,
+/// then the output file card(s) and actions. One output → Open / Save /
+/// Share; many (batch, PDF → images) → a list with Share all.
+class SuccessView extends StatelessWidget {
   const SuccessView({super.key, required this.paths});
   final List<String> paths;
 
-  @override
-  State<SuccessView> createState() => _SuccessViewState();
-}
+  void _withAd(void Function() action) => action();
 
-class _SuccessViewState extends State<SuccessView> {
-  late final ConfettiController _confetti =
-      ConfettiController(duration: const Duration(milliseconds: 900));
-  // ADS DISABLED FOR RELEASE — re-enable: restore the unlock flag + rewarded gate.
-  // bool _unlocked = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _confetti.play());
-  }
-
-  @override
-  void dispose() {
-    _confetti.dispose();
-    super.dispose();
-  }
-
-  void _withAd(void Function() action) {
-    // ADS DISABLED FOR RELEASE — actions run directly. Re-enable: restore below.
-    action();
-    // if (_unlocked) return action();
-    // AdService.instance.showRewardedThen(() {
-    //   if (mounted) setState(() => _unlocked = true);
-    //   action();
-    // });
-  }
-
-  String _sizeLabel(String path) {
-    final f = File(path);
-    final kb = f.existsSync() ? f.lengthSync() / 1024 : 0;
-    return kb > 1024
-        ? '${(kb / 1024).toStringAsFixed(1)} MB'
-        : '${kb.toStringAsFixed(0)} KB';
-  }
-
-  /// One save path for both buttons: real Downloads/PDFNova via MediaStore,
-  /// honest fallbacks, and never a silent failure.
-  Future<void> _save(String path) async {
+  Future<void> _save(BuildContext context, String path) async {
     String message;
     try {
       final where = await FileService.instance.saveToDownloads(path);
@@ -70,7 +31,7 @@ class _SuccessViewState extends State<SuccessView> {
     } catch (_) {
       message = 'Could not save the file. Try Share instead.';
     }
-    if (mounted) {
+    if (context.mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));
     }
@@ -78,160 +39,190 @@ class _SuccessViewState extends State<SuccessView> {
 
   @override
   Widget build(BuildContext context) {
-    final many = widget.paths.length > 1;
-    // ADS DISABLED FOR RELEASE — was: final adReady = AdService.instance.rewardedReady && !_unlocked;
+    final c = context.nova;
+    final t = Theme.of(context).textTheme;
+    final many = paths.length > 1;
 
-    return Stack(
-      alignment: Alignment.topCenter,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              const SizedBox(height: 12),
-              Container(
-                width: 84,
-                height: 84,
-                decoration: const BoxDecoration(
-                    gradient: AppColors.aurora, shape: BoxShape.circle),
-                child: const Icon(Icons.check_rounded,
-                    size: 46, color: Colors.white),
-              )
-                  .animate()
-                  .scale(
-                      begin: const Offset(0, 0),
-                      curve: Curves.elasticOut,
-                      duration: 700.ms)
-                  .then()
-                  .shimmer(duration: 600.ms),
-              const SizedBox(height: 18),
-              Text(many ? '${widget.paths.length} files ready!' : 'Ready!',
-                  style: Theme.of(context).textTheme.headlineMedium),
-              const SizedBox(height: 16),
-              Expanded(
-                child: ListView.separated(
-                  physics: const BouncingScrollPhysics(),
-                  itemCount: widget.paths.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, i) {
-                    final path = widget.paths[i];
-                    final name = path.split('/').last.toLowerCase();
-                    final isImage = name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg');
-                    final isText = name.endsWith('.txt');
-                    final isPpt = name.endsWith('.pptx');
-                    final isDoc = name.endsWith('.docx');
-
-                    final icon = isPpt
-                        ? Icons.slideshow_rounded
-                        : isDoc
-                            ? Icons.description_rounded
-                            : isImage
-                                ? Icons.image_rounded
-                                : isText
-                                    ? Icons.notes_rounded
-                                    : Icons.picture_as_pdf_rounded;
-
-                    return GlassCard(
-                      strong: true,
-                      radius: 18,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      onTap: () =>
-                          _withAd(() => openAnyFile(context, path)),
-                      child: Row(children: [
-                        Icon(icon, color: AppColors.cyan, size: 28),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(path.split('/').last,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style:
-                                      Theme.of(context).textTheme.bodyLarge),
-                              const SizedBox(height: 2),
-                              Text(_sizeLabel(path),
-                                  style:
-                                      Theme.of(context).textTheme.bodyMedium),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.download_rounded, color: AppColors.cyan, size: 22),
-                          onPressed: () => _withAd(() => _save(path)),
-                        ),
-                      ]),
-                    )
-                        .animate(delay: (60 * i).ms)
-                        .fadeIn(duration: 300.ms)
-                        .slideY(begin: 0.2);
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    // ADS DISABLED — re-enable: restore adReady above and use
-                    // label: adReady ? 'Watch ad · Open' : 'Open File',
-                    // icon: adReady ? play_circle_outline : open_in_new
-                    child: AuroraButton(
-                      label: 'Open File',
-                      icon: Icons.open_in_new_rounded,
-                      onPressed: () => _withAd(() =>
-                          openAnyFile(context, widget.paths.first)),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: GlassCard(
-                      radius: 18,
-                      strong: true,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      onTap: () => _withAd(() => _save(widget.paths.first)),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          20, 8, 20, 16 + MediaQuery.paddingOf(context).bottom),
+      child: Column(
+        children: [
+          const SizedBox(height: 16),
+          const _DoneMark(),
+          const SizedBox(height: 22),
+          Text(many ? '${paths.length} files ready' : 'Done.',
+                  style: t.displaySmall)
+              .enter(context, delayMs: 350),
+          const SizedBox(height: 6),
+          Text('Saved privately in the app. Save or share it below.',
+                  style: t.bodyMedium, textAlign: TextAlign.center)
+              .enter(context, delayMs: 420),
+          const SizedBox(height: 24),
+          Expanded(
+            child: ListView.separated(
+              physics: const BouncingScrollPhysics(),
+              itemCount: paths.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, i) {
+                final path = paths[i];
+                final (icon, (fg, bg)) = fileLook(context, path);
+                return NovaCard(
+                  radius: 18,
+                  padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
+                  onTap: () => _withAd(() => openAnyFile(context, path)),
+                  child: Row(children: [
+                    NovaIconTile(icon: icon, fg: fg, bg: bg, size: 42),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.download_rounded, color: AppColors.cyan, size: 20),
-                          SizedBox(width: 8),
-                          Text('Save File',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 15)),
+                          Text(path.split('/').last,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.titleSmall),
+                          const SizedBox(height: 3),
+                          Text(fileSize(path), style: t.bodySmall),
                         ],
                       ),
                     ),
-                  ),
-                ],
-              ).animate().fadeIn(delay: 350.ms).slideY(begin: 0.3),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: () => _withAd(() => many
-                    ? FileService.instance.shareAll(widget.paths)
-                    : FileService.instance.share(widget.paths.first)),
-                icon: const Icon(Icons.ios_share_rounded,
-                    size: 18, color: AppColors.cyan),
-                label: Text(many ? 'Share All' : 'Share',
-                    style: Theme.of(context)
-                        .textTheme
-                        .labelLarge
-                        ?.copyWith(color: AppColors.cyan)),
-              ).animate().fadeIn(delay: 450.ms),
-            ],
+                    IconButton(
+                      tooltip: 'Save to Downloads',
+                      icon: Icon(Icons.download_rounded, color: c.accent),
+                      onPressed: () => _withAd(() => _save(context, path)),
+                    ),
+                  ]),
+                ).enter(context, index: i, delayMs: 480);
+              },
+            ),
           ),
-        ),
-        ConfettiWidget(
-          confettiController: _confetti,
-          blastDirection: math.pi / 2,
-          blastDirectionality: BlastDirectionality.explosive,
-          emissionFrequency: 0.6,
-          numberOfParticles: 18,
-          maxBlastForce: 24,
-          colors: const [AppColors.violet, AppColors.cyan, Colors.white],
-        ),
-      ],
+          const SizedBox(height: 14),
+          Column(children: [
+            NovaButton(
+              label: many ? 'Open first file' : 'Open',
+              icon: Icons.open_in_new_rounded,
+              onPressed: () =>
+                  _withAd(() => openAnyFile(context, paths.first)),
+            ),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: NovaButton.secondary(
+                  label: 'Save',
+                  icon: Icons.download_rounded,
+                  onPressed: () =>
+                      _withAd(() => _save(context, paths.first)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: NovaButton.secondary(
+                  label: many ? 'Share all' : 'Share',
+                  icon: Icons.ios_share_rounded,
+                  onPressed: () => _withAd(() => many
+                      ? FileService.instance.shareAll(paths)
+                      : FileService.instance.share(paths.first)),
+                ),
+              ),
+            ]),
+          ]).enter(context, delayMs: 560),
+        ],
+      ),
     );
   }
+}
+
+/// Ring scales open with a soft pulse, then the tick draws on.
+class _DoneMark extends StatefulWidget {
+  const _DoneMark();
+
+  @override
+  State<_DoneMark> createState() => _DoneMarkState();
+}
+
+class _DoneMarkState extends State<_DoneMark>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900));
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_c.isAnimating || _c.isCompleted) return;
+    NovaMotion.reduced(context) ? _c.value = 1 : _c.forward();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.nova;
+    final ring = CurvedAnimation(
+        parent: _c, curve: const Interval(0, 0.55, curve: Curves.easeOutBack));
+    final tick = CurvedAnimation(
+        parent: _c, curve: const Interval(0.35, 0.85, curve: Curves.easeOutCubic));
+    final pulse = CurvedAnimation(
+        parent: _c, curve: const Interval(0.3, 1, curve: Curves.easeOut));
+    return SizedBox.square(
+      dimension: 112,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) => Stack(alignment: Alignment.center, children: [
+          // Fading pulse ring.
+          Opacity(
+            opacity: (1 - pulse.value) * 0.6,
+            child: Container(
+              width: 84 + 28 * pulse.value,
+              height: 84 + 28 * pulse.value,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: c.success, width: 1.5),
+              ),
+            ),
+          ),
+          Transform.scale(
+            scale: ring.value,
+            child: Container(
+              width: 84,
+              height: 84,
+              decoration:
+                  BoxDecoration(color: c.successSoft, shape: BoxShape.circle),
+              child: CustomPaint(painter: _TickPainter(tick.value, c.success)),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _TickPainter extends CustomPainter {
+  _TickPainter(this.t, this.color);
+  final double t;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size s) {
+    final path = Path()
+      ..moveTo(s.width * 0.3, s.height * 0.52)
+      ..lineTo(s.width * 0.45, s.height * 0.66)
+      ..lineTo(s.width * 0.71, s.height * 0.38);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..color = color;
+    for (final ui.PathMetric m in path.computeMetrics()) {
+      canvas.drawPath(m.extractPath(0, m.length * t), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_TickPainter old) => old.t != t || old.color != color;
 }

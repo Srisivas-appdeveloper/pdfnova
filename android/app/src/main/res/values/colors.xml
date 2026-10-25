@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches NovaColors.light.canvas so launch → Flutter has no colour flash -->
+    <color name="nova_canvas">#F4F1EB</color>
+    <!-- Launcher icon background: always paper, in light and dark -->
+    <color name="nova_icon_bg">#F4F1EB</color>
+</resources>

@@ -101,3 +101,7 @@ const toolSections = <ToolSection>[
 
 /// Flat list (used by batch mode + lookups)
 final allTools = [for (final s in toolSections) ...s.tools];
+
+/// Index of the section a tool belongs to — drives its tint colour.
+int sectionIndexOf(Tool tool) =>
+    toolSections.indexWhere((s) => s.tools.any((t) => t.id == tool.id));

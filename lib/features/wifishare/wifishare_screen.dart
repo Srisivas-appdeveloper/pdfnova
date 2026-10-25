@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/theme/app_colors.dart';
-import '../../core/widgets/glass_card.dart';
-import '../../core/widgets/glass_button.dart';
-import '../../core/widgets/gradient_background.dart';
+import '../../core/theme/app_motion.dart';
+import '../../core/widgets/nova_button.dart';
+import '../../core/widgets/nova_card.dart';
+import '../../core/widgets/nova_controls.dart';
+import '../../core/widgets/nova_entrance.dart';
+import '../tool/tool_header.dart';
 import '../../services/file_service.dart';
 import '../../services/wifi_share_service.dart';
 import '../home/tools.dart';
@@ -58,67 +61,98 @@ class _WifiShareScreenState extends State<WifiShareScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return GradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(title: Text(widget.tool.title)),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(28),
-            child: _url == null
-                ? Column(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.wifi_tethering_rounded,
-                        size: 52, color: AppColors.cyan),
-                    const SizedBox(height: 16),
-                    Text('Share without internet',
-                        style: Theme.of(context).textTheme.titleLarge),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Both phones on the same WiFi or hotspot. Pick a file, the other phone scans the code in its camera or browser.',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: 24),
-                    AuroraButton(
-                        label: 'Choose file & start',
-                        icon: Icons.upload_file_rounded,
-                        expanded: false,
-                        onPressed: _start),
-                  ])
-                : Column(mainAxisSize: MainAxisSize.min, children: [
-                    GlassCard(
-                      strong: true,
-                      child: Column(children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(16)),
-                          child: QrImageView(data: _url!, size: 200),
-                        ),
-                        const SizedBox(height: 14),
-                        Text(_fileName ?? '',
-                            style: Theme.of(context).textTheme.bodyLarge),
-                        const SizedBox(height: 6),
-                        SelectableText(_url!,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(color: AppColors.cyan)),
-                      ]),
-                    ),
-                    const SizedBox(height: 18),
-                    TextButton(
-                      onPressed: () async {
-                        await WifiShareService.instance.stop();
-                        setState(() => _url = null);
-                      },
-                      child: const Text('Stop sharing',
-                          style: TextStyle(color: AppColors.danger)),
-                    ),
-                  ]),
-          ),
+    final c = context.nova;
+    final t = Theme.of(context).textTheme;
+    return Scaffold(
+      backgroundColor: c.canvas,
+      appBar: AppBar(),
+      body: AnimatedSwitcher(
+        duration: NovaMotion.page,
+        switchInCurve: NovaMotion.emphasized,
+        transitionBuilder: (child, a) => FadeTransition(
+          opacity: a,
+          child: ScaleTransition(
+              scale: Tween(begin: 0.96, end: 1.0).animate(a), child: child),
         ),
+        child: _url == null
+            ? ListView(
+                key: const ValueKey('idle'),
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                children: [
+                  ToolHeader(tool: widget.tool),
+                  for (final (i, (icon, text)) in const [
+                    (Icons.wifi_rounded,
+                        'Both phones on the same WiFi or hotspot — no internet needed.'),
+                    (Icons.qr_code_2_rounded,
+                        'The other phone scans the code with its camera, or types the link in any browser.'),
+                    (Icons.timer_outlined,
+                        'Sharing stops when you tap Stop or leave this screen.'),
+                  ].indexed)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: NovaCard(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(children: [
+                          NovaIconTile(icon: icon, size: 40),
+                          const SizedBox(width: 14),
+                          Expanded(child: Text(text, style: t.bodyMedium)),
+                        ]),
+                      ).enter(context, index: i, delayMs: 200),
+                    ),
+                  const SizedBox(height: 14),
+                  NovaButton(
+                      label: 'Choose file & start',
+                      icon: Icons.upload_file_rounded,
+                      onPressed: _start),
+                ],
+              )
+            : ListView(
+                key: const ValueKey('live'),
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                children: [
+                  Row(children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                          color: c.success, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 10),
+                    Text('Sharing now', style: t.titleMedium),
+                  ]),
+                  const SizedBox(height: 16),
+                  NovaCard(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(children: [
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                            color: Colors.white, // QR needs a light ground
+                            borderRadius: BorderRadius.circular(18)),
+                        child: QrImageView(data: _url!, size: 210),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(_fileName ?? '',
+                          textAlign: TextAlign.center,
+                          style: t.titleMedium),
+                      const SizedBox(height: 6),
+                      SelectableText(_url!,
+                          textAlign: TextAlign.center,
+                          style: t.bodyMedium?.copyWith(color: c.accent)),
+                    ]),
+                  ).enter(context),
+                  const SizedBox(height: 16),
+                  NovaButton.secondary(
+                    label: 'Stop sharing',
+                    icon: Icons.stop_circle_outlined,
+                    color: c.danger,
+                    onPressed: () async {
+                      await WifiShareService.instance.stop();
+                      setState(() => _url = null);
+                    },
+                  ),
+                ],
+              ),
       ),
     );
   }

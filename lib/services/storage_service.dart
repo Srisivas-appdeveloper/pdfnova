@@ -1,7 +1,8 @@
+import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 /// Hive-backed local storage. Two boxes:
-///  - settings: counters used for ad frequency capping, prefs
+///  - settings: counters used for ad frequency capping, appearance prefs
 ///  - recents:  last 20 output files for the home screen "Recent" rail
 class StorageService {
   StorageService._();
@@ -14,6 +15,26 @@ class StorageService {
     await Hive.initFlutter();
     _settings = await Hive.openBox('settings');
     _recents = await Hive.openBox('recents');
+    themeMode.value = ThemeMode.values.firstWhere(
+      (m) => m.name == _settings.get('themeMode'),
+      orElse: () => ThemeMode.system,
+    );
+    reduceMotion.value = _settings.get('reduceMotion', defaultValue: false);
+  }
+
+  // ---- Appearance ------------------------------------------------------
+  /// Listened to by the app root; changing it re-themes the whole app.
+  final themeMode = ValueNotifier<ThemeMode>(ThemeMode.system);
+  final reduceMotion = ValueNotifier<bool>(false);
+
+  Future<void> setThemeMode(ThemeMode mode) {
+    themeMode.value = mode;
+    return _settings.put('themeMode', mode.name);
+  }
+
+  Future<void> setReduceMotion(bool on) {
+    reduceMotion.value = on;
+    return _settings.put('reduceMotion', on);
   }
 
   // ---- Ad frequency capping -------------------------------------------
@@ -50,4 +71,7 @@ class StorageService {
       });
     await _recents.put('list', list.take(20).toList());
   }
+
+  Future<void> removeRecent(String path) => _recents.put(
+      'list', recents.where((r) => r['path'] != path).toList());
 }
