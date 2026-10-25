@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 6–11 Auto Backup. The vault key lives in the Keystore, which is
+     never backed up, so restoring encrypted vault files (or the wrapped key
+     prefs) to a new device would only produce unreadable data. Keep both out. -->
+<full-backup-content>
+    <exclude domain="root" path="app_flutter/PDFNovaVault/" />
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml" />
+</full-backup-content>

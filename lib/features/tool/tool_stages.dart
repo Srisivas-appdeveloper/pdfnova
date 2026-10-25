@@ -28,7 +28,8 @@ class ToolStages extends StatelessWidget {
       // Block back mid-write so work never runs headless.
       canPop: state is! ToolProcessing,
       child: PageTransitionSwitcher(
-        duration: NovaMotion.reduced(context) ? NovaMotion.quick : NovaMotion.page,
+        duration:
+            NovaMotion.reduced(context) ? NovaMotion.quick : NovaMotion.page,
         transitionBuilder: (child, a, b) => FadeThroughTransition(
           animation: a,
           secondaryAnimation: b,
@@ -40,8 +41,8 @@ class ToolStages extends StatelessWidget {
               key: const ValueKey('processing'),
               progress: s.progress,
               label: processingLabel),
-          ToolSuccess s =>
-            SuccessView(key: const ValueKey('success'), paths: s.paths),
+          ToolSuccess s => SuccessView(
+              key: const ValueKey('success'), paths: s.paths, notes: s.notes),
           _ => KeyedSubtree(key: const ValueKey('input'), child: input),
         },
       ),

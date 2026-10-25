@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/nova_button.dart';
 import '../../core/widgets/nova_card.dart';
 import '../../core/widgets/nova_entrance.dart';
 import '../../services/file_service.dart';
+import '../../services/notes_store.dart';
+import '../../services/pdf_service.dart';
+import '../../services/unicode_text_layout.dart';
 import '../../services/storage_service.dart';
 import '../home/tools.dart';
 
@@ -18,16 +21,86 @@ class NotesScreen extends StatefulWidget {
   State<NotesScreen> createState() => _NotesScreenState();
 }
 
-class _NotesScreenState extends State<NotesScreen> {
+class _NotesScreenState extends State<NotesScreen> with WidgetsBindingObserver {
   final _titleController = TextEditingController();
   final _bodyController = TextEditingController();
+  final _store = NotesStore.instance;
   bool _saving = false;
+  bool _loaded = false;
+
+  /// Version of the note this editor is based on (compare-and-set).
+  int _version = 0;
+  bool _dirty = false;
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _bodyController.addListener(_onEdit);
+    _reload();
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _flush();
+    _debounce?.cancel();
     _titleController.dispose();
     _bodyController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Save before the user can switch to the widget; pick up widget edits
+    // when they come back.
+    if (state == AppLifecycleState.paused) _flush();
+    if (state == AppLifecycleState.resumed) _reload();
+  }
+
+  Future<void> _reload() async {
+    try {
+      final note = await _store.load();
+      if (!mounted) return;
+      if (!_loaded || (!_dirty && note.updatedAt > _version)) {
+        _bodyController
+          ..removeListener(_onEdit)
+          ..text = note.text
+          ..addListener(_onEdit);
+        _version = note.updatedAt;
+      }
+      setState(() => _loaded = true);
+    } catch (_) {
+      if (mounted) setState(() => _loaded = true);
+    }
+  }
+
+  void _onEdit() {
+    _dirty = true;
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 700), _flush);
+  }
+
+  Future<void> _flush() async {
+    if (!_dirty) return;
+    _dirty = false;
+    final text = _bodyController.text;
+    try {
+      final r = await _store.save(text, baseVersion: _version);
+      _version = r.note.updatedAt;
+      if (r.merged && mounted) {
+        _bodyController
+          ..removeListener(_onEdit)
+          ..text = r.note.text
+          ..addListener(_onEdit);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Your note was also edited from the Home Screen widget — both versions were kept.')));
+      }
+    } catch (_) {
+      _dirty = true; // try again on the next edit or pause
+    }
   }
 
   Future<void> _exportNoteToPdf() async {
@@ -36,82 +109,37 @@ class _NotesScreenState extends State<NotesScreen> {
 
     if (bodyText.isEmpty && titleText.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter some text in your note before saving.')),
+        const SnackBar(
+            content:
+                Text('Please enter some text in your note before saving.')),
       );
       return;
     }
 
     setState(() => _saving = true);
-
+    await _flush();
     try {
       final title = titleText.isEmpty ? 'Untitled Note' : titleText;
-
-      // Create PDF Document using Syncfusion
+      final now = DateTime.now();
+      // Same Unicode-aware writer as Word → PDF, so notes in Tamil, Hindi
+      // and other supported scripts keep their text.
       final doc = sf.PdfDocument();
-      final page = doc.pages.add();
-      final graphics = page.graphics;
-      final pageSize = page.getClientSize();
-
-      // Title font & Body font
-      final titleFont = sf.PdfStandardFont(sf.PdfFontFamily.helvetica, 22,
-          style: sf.PdfFontStyle.bold);
-      final subtitleFont = sf.PdfStandardFont(sf.PdfFontFamily.helvetica, 10,
-          style: sf.PdfFontStyle.italic);
-      final bodyFont = sf.PdfStandardFont(sf.PdfFontFamily.helvetica, 12);
-
-      // Draw Title
-      graphics.drawString(
-        title,
-        titleFont,
-        brush: sf.PdfBrushes.darkBlue,
-        bounds: Rect.fromLTWH(0, 0, pageSize.width, 30),
-      );
-
-      // Draw Timestamp Subtitle
-      final timestampStr = 'Created on ${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year} at ${TimeOfDay.now().format(context)}';
-      graphics.drawString(
-        timestampStr,
-        subtitleFont,
-        brush: sf.PdfBrushes.gray,
-        bounds: Rect.fromLTWH(0, 32, pageSize.width, 18),
-      );
-
-      // Draw Horizontal Line
-      graphics.drawLine(
-        sf.PdfPen(sf.PdfColor(124, 92, 255), width: 1.5),
-        const Offset(0, 54),
-        Offset(pageSize.width, 54),
-      );
-
-      // Draw Body Text using PdfTextElement for automatic pagination
-      final textElement = sf.PdfTextElement(
-        text: bodyText.isEmpty ? 'No notes content.' : bodyText,
-        font: bodyFont,
-        brush: sf.PdfBrushes.black,
-      );
-
-      final layoutFormat = sf.PdfLayoutFormat(
-        layoutType: sf.PdfLayoutType.paginate,
-      );
-
-      textElement.draw(
-        page: page,
-        bounds: Rect.fromLTWH(0, 68, pageSize.width, pageSize.height - 78),
-        format: layoutFormat,
-      );
-
-      // Save PDF to Local Storage
+      await UnicodePdfWriter(doc).write([
+        DocParagraph(title, heading: 1),
+        DocParagraph(
+            '${now.day}/${now.month}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}'),
+        for (final line
+            in (bodyText.isEmpty ? 'No notes content.' : bodyText).split('\n'))
+          DocParagraph(line),
+      ]);
       final bytes = await doc.save();
       doc.dispose();
 
-      final dir = await getApplicationDocumentsDirectory();
       final safeName = title.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-      final outPath = '${dir.path}/${safeName}_Note_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final outPath = await PdfService.instance.outPath('${safeName}_Note');
+      await File(outPath).writeAsBytes(bytes, flush: true);
 
-      final file = File(outPath);
-      await file.writeAsBytes(bytes);
-
-      // Record in Recents under 'Notes'
+      // Record in history under 'Notes'
       await StorageService.instance.addRecent(outPath, 'Notes');
       await StorageService.instance.incrementOps();
 
@@ -126,13 +154,12 @@ class _NotesScreenState extends State<NotesScreen> {
             ),
           ),
         );
-        FileService.instance.open(outPath);
       }
     } catch (e) {
       if (mounted) {
         setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving note: $e')),
+          const SnackBar(content: Text('Could not save the note as a PDF.')),
         );
       }
     }
@@ -143,8 +170,20 @@ class _NotesScreenState extends State<NotesScreen> {
     final c = context.nova;
     final t = Theme.of(context).textTheme;
     final now = DateTime.now();
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
-      'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
     return Scaffold(
       backgroundColor: c.canvas,
       appBar: AppBar(
@@ -186,7 +225,7 @@ class _NotesScreenState extends State<NotesScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 6, 4, 16),
               child: Text(
-                '${now.day} ${months[now.month - 1]} ${now.year} · saved as a PDF in Files › Notes',
+                '${now.day} ${months[now.month - 1]} ${now.year} · ${Platform.isAndroid ? 'synced with your Home Screen note · ' : ''}Save PDF to keep a copy in Files',
                 style: t.bodySmall,
               ),
             ).enter(context, delayMs: 180),

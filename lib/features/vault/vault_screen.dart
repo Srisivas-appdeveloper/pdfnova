@@ -1,20 +1,23 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:local_auth/local_auth.dart';
-import 'package:path_provider/path_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_motion.dart';
 import '../../core/widgets/nova_button.dart';
 import '../../core/widgets/nova_card.dart';
 import '../../core/widgets/nova_controls.dart';
 import '../../core/widgets/nova_entrance.dart';
+import '../../core/widgets/nova_dialog.dart';
 import '../../services/file_service.dart';
+import '../../services/vault_service.dart';
+import '../files/file_row.dart';
+import '../tool/tool_header.dart';
+import '../tool/tool_stages.dart';
 import '../home/tools.dart';
 
-/// Vault: biometric-gated private folder inside app storage. Files are
-/// copied here and can only be listed after fingerprint / face / device-PIN
-/// unlock. (App-private storage means other apps can't browse it.)
+/// Vault: biometric-gated, AES-256-GCM encrypted private folder (see
+/// VaultService). Files are encrypted on the way in, decrypted only into
+/// app-private temp storage to view, and wiped from there on lock.
 class VaultScreen extends StatefulWidget {
   const VaultScreen({super.key, required this.tool});
   final Tool tool;
@@ -23,26 +26,51 @@ class VaultScreen extends StatefulWidget {
   State<VaultScreen> createState() => _VaultScreenState();
 }
 
-class _VaultScreenState extends State<VaultScreen> {
+class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
   final _auth = LocalAuthentication();
+  final _vault = VaultService.instance;
   bool _unlocked = false;
-  List<FileSystemEntity> _files = [];
+  bool _busy = false;
+  List<VaultEntry> _entries = [];
+  int _legacyCount = 0;
+  String? _error;
+  // True while we sent the user to another screen ourselves (the file
+  // picker, or another app showing a decrypted copy). That pause is ours:
+  // it must not re-lock the vault or wipe the file under the viewer.
+  bool _ownPause = false;
 
-  Future<Directory> _vaultDir() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return Directory('${dir.path}/PDFNovaVault')..createSync(recursive: true);
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Decrypted copies from an earlier session must not linger.
+    _vault.purgeTemp();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _lock();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _ownPause = false;
+    // Leaving the app re-locks the vault and wipes decrypted copies.
+    if (state == AppLifecycleState.paused && _unlocked && !_ownPause) {
+      setState(_lock);
+    }
+  }
+
+  void _lock() {
+    _unlocked = false;
+    _entries = [];
+    _vault.lock();
+    _vault.purgeTemp();
   }
 
   Future<void> _unlock() async {
-    // Check if the device has biometric hardware and enrolled credentials.
-    final canCheck = await _auth.canCheckBiometrics;
-    final isDeviceSupported = await _auth.isDeviceSupported();
-
-    if (!canCheck && !isDeviceSupported) {
-      // No biometrics at all — device PIN/pattern fallback is still valid.
-      // local_auth will use device credentials automatically.
-    }
-
     bool ok = false;
     try {
       ok = await _auth.authenticate(
@@ -61,38 +89,136 @@ class _VaultScreenState extends State<VaultScreen> {
       final msg = e.toString();
       final notEnrolled =
           msg.contains('NotEnrolled') || msg.contains('notEnrolled');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(notEnrolled
-              ? 'No fingerprint or screen lock is set up on this device. Set one up in Settings to use the Vault.'
-              : 'Could not verify your identity. Please try again.'),
-        ),
-      );
+      _snack(notEnrolled
+          ? 'No fingerprint or screen lock is set up on this device. Set one up in Settings to use the Vault.'
+          : 'Could not verify your identity. Please try again.');
       return;
     }
-
     if (!ok || !mounted) return;
-    final dir = await _vaultDir();
-    setState(() {
-      _unlocked = true;
-      _files = dir.listSync().whereType<File>().toList();
-    });
+    setState(() => _unlocked = true);
+    await _refresh();
+  }
+
+  Future<void> _refresh() async {
+    try {
+      final entries = await _vault.list();
+      final legacy = await _vault.legacyFiles();
+      if (!mounted) return;
+      setState(() {
+        _entries = entries;
+        _legacyCount = legacy.length;
+        _error = null;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _run(Future<void> Function() job) async {
+    setState(() => _busy = true);
+    try {
+      await job();
+    } catch (e) {
+      _snack(e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+      await _refresh();
+    }
+  }
+
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   Future<void> _addFile() async {
+    _ownPause = true;
     final picked = await FileService.instance.pickPdfs();
+    _ownPause = false;
     if (picked.isEmpty) return;
-    final dir = await _vaultDir();
-    final dest = File('${dir.path}/${picked.first.name}');
-    await dest.writeAsBytes(picked.first.bytes, flush: true);
-    setState(() => _files = dir.listSync().whereType<File>().toList());
+    await _run(() async {
+      await _vault.add(picked.first.name, picked.first.bytes);
+      _snack(
+          'Encrypted and added to the vault. Your original file was not changed.');
+    });
   }
 
-  Future<void> _delete(FileSystemEntity f) async {
-    await File(f.path).delete();
-    final dir = await _vaultDir();
-    setState(() => _files = dir.listSync().whereType<File>().toList());
+  Future<void> _open(VaultEntry e) => _run(() async {
+        final file = await _vault.exportToTemp(e);
+        _ownPause = true;
+        await FileService.instance.open(file.path);
+      });
+
+  Future<void> _delete(VaultEntry e) async {
+    final ok = await _confirm(
+      title: 'Delete from vault?',
+      body: '"${e.name}" will be permanently removed from the vault.',
+      action: 'Delete',
+    );
+    if (ok == true) await _run(() => _vault.delete(e));
   }
+
+  Future<void> _migrate() async {
+    final ok = await _confirm(
+      title: 'Encrypt older files?',
+      body:
+          '$_legacyCount ${_legacyCount == 1 ? 'file was' : 'files were'} added before the vault used encryption. '
+          'Each one is encrypted, decrypted again and compared. Only after that check passes is the unencrypted copy removed. '
+          'If anything fails, the original stays exactly as it is.',
+      action: 'Encrypt now',
+      destructive: false,
+    );
+    if (ok != true) return;
+    await _run(() async {
+      final r = await _vault.migrateLegacy();
+      _snack(r.failed.isEmpty
+          ? 'Encrypted ${r.migrated.length} ${r.migrated.length == 1 ? 'file' : 'files'}.'
+          : 'Encrypted ${r.migrated.length}; ${r.failed.length} could not be encrypted and were left unchanged.');
+    });
+  }
+
+  Future<bool?> _confirm({
+    required String title,
+    required String body,
+    required String action,
+    bool destructive = true,
+  }) =>
+      showNovaDialog<bool>(
+        context: context,
+        builder: (d) {
+          final t = Theme.of(d).textTheme;
+          return Dialog(
+            insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 26, 24, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: t.headlineSmall),
+                  const SizedBox(height: 8),
+                  Text(body, style: t.bodyMedium),
+                  const SizedBox(height: 22),
+                  Row(children: [
+                    Expanded(
+                      child: NovaButton.secondary(
+                          label: 'Cancel',
+                          onPressed: () => Navigator.pop(d, false)),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: NovaButton(
+                          label: action,
+                          color: destructive ? d.nova.danger : null,
+                          onPressed: () => Navigator.pop(d, true)),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          );
+        },
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -105,10 +231,7 @@ class _VaultScreenState extends State<VaultScreen> {
             NovaIconButton(
               tooltip: 'Lock',
               icon: Icons.lock_outline_rounded,
-              onPressed: () => setState(() {
-                _unlocked = false;
-                _files = [];
-              }),
+              onPressed: () => setState(_lock),
             ),
           const SizedBox(width: 12),
         ],
@@ -145,9 +268,9 @@ class _VaultScreenState extends State<VaultScreen> {
           .scale(
               begin: const Offset(0.8, 0.8),
               end: const Offset(1.25, 1.25),
-              duration: 1800.ms,
+              duration: NovaMotion.ambient,
               curve: Curves.easeOut)
-          .fadeOut(duration: 1800.ms);
+          .fadeOut(duration: NovaMotion.ambient);
     }
     return Center(
       key: const ValueKey('locked'),
@@ -190,65 +313,115 @@ class _VaultScreenState extends State<VaultScreen> {
     final t = Theme.of(context).textTheme;
     return Column(key: const ValueKey('open'), children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 6),
         child: Row(children: [
           Text('Vault', style: t.headlineLarge),
           const SizedBox(width: 10),
           Icon(Icons.lock_open_rounded, size: 20, color: c.success),
           const Spacer(),
-          Text('${_files.length} ${_files.length == 1 ? 'file' : 'files'}',
+          Text('${_entries.length} ${_entries.length == 1 ? 'file' : 'files'}',
               style: t.bodyMedium),
         ]).enter(context),
       ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 14),
+        child: Row(children: [
+          Icon(Icons.enhanced_encryption_outlined, size: 15, color: c.inkLow),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+                'AES-256 encrypted on this phone. Re-locks when you leave.',
+                style: t.bodySmall),
+          ),
+        ]),
+      ),
+      if (_busy) const LinearProgressIndicator(minHeight: 2),
+      if (_legacyCount > 0)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+          child: NovaCard(
+            color: c.accentSoft,
+            borderColor: Colors.transparent,
+            padding: const EdgeInsets.all(16),
+            child: Row(children: [
+              Icon(Icons.shield_outlined, color: c.accent),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                    '$_legacyCount older ${_legacyCount == 1 ? 'file is' : 'files are'} not encrypted yet.',
+                    style: t.titleSmall),
+              ),
+              TextButton(
+                  onPressed: _busy ? null : _migrate,
+                  child: const Text('Encrypt')),
+            ]),
+          ).enter(context),
+        ),
+      if (_error != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+          child: ToolNote(_error!, icon: Icons.error_outline_rounded),
+        ),
       Expanded(
-        child: _files.isEmpty
+        child: _entries.isEmpty
             ? Center(
-                child: Text('The vault is empty — add a PDF below.',
+                child: Text(
+                    _legacyCount > 0
+                        ? 'Encrypt your older files to see them here.'
+                        : 'The vault is empty — add a PDF below.',
                     style: t.bodyMedium))
             : ListView.separated(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                itemCount: _files.length,
+                itemCount: _entries.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (context, i) {
-                  final f = _files[i];
+                  final e = _entries[i];
                   return NovaCard(
                     radius: 18,
-                    onTap: () => FileService.instance.open(f.path),
+                    onTap: e.damaged || _busy ? null : () => _open(e),
                     padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
                     child: Row(children: [
                       NovaIconTile(
-                          icon: Icons.picture_as_pdf_outlined,
+                          icon: e.damaged
+                              ? Icons.report_gmailerrorred_rounded
+                              : Icons.picture_as_pdf_outlined,
                           fg: c.danger,
                           bg: c.dangerSoft,
                           size: 40),
                       const SizedBox(width: 14),
                       Expanded(
-                          child: Text(f.path.split('/').last,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: t.titleSmall)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(e.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: t.titleSmall),
+                            Text(
+                                e.damaged
+                                    ? 'Cannot be decrypted — kept, not deleted'
+                                    : formatBytes(e.size),
+                                style: t.bodySmall?.copyWith(
+                                    color: e.damaged ? c.danger : null)),
+                          ],
+                        ),
+                      ),
                       IconButton(
                         tooltip: 'Delete',
                         icon: Icon(Icons.delete_outline_rounded,
                             color: c.danger, size: 20),
-                        onPressed: () => _delete(f),
+                        onPressed: _busy ? null : () => _delete(e),
                       ),
                     ]),
                   ).enter(context, index: i);
                 },
               ),
       ),
-      Container(
-        padding: EdgeInsets.fromLTRB(
-            20, 12, 20, 12 + MediaQuery.paddingOf(context).bottom),
-        decoration: BoxDecoration(
-          color: c.canvas,
-          border: Border(top: BorderSide(color: c.border)),
-        ),
+      ToolActionBar(
         child: NovaButton(
             label: 'Add PDF to vault',
             icon: Icons.add_rounded,
-            onPressed: _addFile),
+            onPressed: _busy ? null : _addFile),
       ),
     ]);
   }

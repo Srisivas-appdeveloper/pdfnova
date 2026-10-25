@@ -26,6 +26,7 @@ class NoteEditActivity : Activity() {
         findViewById<View>(R.id.btn_note_save).setOnClickListener {
             prefs.edit()
                 .putString(PdfNovaNotesWidgetProvider.KEY_NOTE, editor.text.toString())
+                .putLong(PdfNovaNotesWidgetProvider.KEY_UPDATED_AT, System.currentTimeMillis())
                 .apply()
             PdfNovaNotesWidgetProvider.updateAll(this)
             finish()

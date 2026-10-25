@@ -131,30 +131,37 @@ Runs on a background isolate so the progress ring never freezes.
 - Output folder: `PDFNova/images_<timestamp>/page_1.jpg …`
 
 ### PDF → Text
-- Extracts the text layer with Syncfusion.
-- If fewer than 10 characters come back (a scanned PDF), it **falls back to OCR** automatically.
+- Extracts each page's text layer (line-based extraction — Syncfusion's plain extractor mis-decodes text after a font switch), with **on-device OCR only for pages that have no text**.
+- Multi-page output has page markers (`───── Page 2 ─────`); the result notes say when OCR was used.
 - Output: `extracted_<timestamp>.txt`
 
 ### PDF → Word (.docx)
 Service: [lib/services/conversion_service.dart](lib/services/conversion_service.dart)
-- Builds a real `.docx` (OpenXML zip) entirely offline.
-- For **each page**:
-  - a high-resolution **image of the page** (1.8×, JPEG 90) so layout and pictures are preserved, followed by
-  - the page's **editable text**, line by line, with **centre and right alignment detected** from line positions.
-- **Scanned PDFs** (under ~15 characters per page) are OCR'd first so the Word file still has editable text.
-- Page breaks between pages.
+Two modes, chosen on the tool screen — **each page's content appears once** (the old version put a page picture *and* its text, duplicating everything):
+
+| Mode | Result |
+|---|---|
+| **Editable text** (default) | Real paragraphs with centre/right alignment detected from line positions. Scanned pages are OCR'd. Pages with no readable text at all are added as a picture (and the result says how many). Images and exact layout are not carried over. |
+| **Exact look** | Every page as a picture (keeps aspect ratio, fits the page). Looks identical; not editable. |
+
+- The generated .docx is **re-opened and checked** (required parts, body, image links) before success is reported.
 
 ### Word → PDF
-- Reads paragraphs from `word/document.xml` in the `.docx`.
-- Lays them out on PDF pages in Helvetica 12 pt with word wrap, 60 pt margins and automatic page breaks.
-- Smart quotes, dashes, bullets, ™ © ® are converted to safe equivalents.
+- Reads paragraphs, **headings** (Title/Heading 1–3), tabs and line breaks.
+- **Unicode-correct**: Latin, Greek, Cyrillic and symbols (₹, —, “ ”) as vector text in embedded **Noto Sans**; **Tamil, Hindi/Devanagari, Telugu, Kannada, Malayalam, Bengali, Gujarati** are shaped by the device's text engine (correct vowel-sign order and conjuncts), drawn at 3× resolution, with an **invisible text layer in the matching embedded Noto font** so the PDF stays searchable and copyable.
+- Scripts without a bundled font (Arabic, Hebrew, CJK, emoji…) are drawn with the phone's fonts and **reported** in the result as not searchable — never silently dropped.
+- The result PDF is re-opened and checked before success.
+- Verified: unit tests extract every supported script; the on-device output was rendered with poppler and Google's PDF viewer.
+- Images, tables and styling from Word are not carried over (stated in the result).
 
 ### PDF → PPT (.pptx)
-- Renders each page (1.5×, JPEG 90) and places it as a full-slide picture in a valid `.pptx` (4:3 slides).
+- Each page becomes one slide picture. **Slide size follows the first page's shape** (portrait documents get portrait slides) and every page is **letterboxed, never stretched**, on a white slide.
+- The .pptx is re-opened and checked (slide and image parts) before success.
 - Opens in the built-in [PPT viewer](#built-in-pptx-viewer) as well as PowerPoint, Google Slides or WPS.
 
 ---
 
+## 4. Secure tools
 ## 4. Secure tools
 
 ### Unlock
@@ -182,14 +189,16 @@ Two modes, switchable with a segmented control:
 - Output: `clean_<timestamp>.pdf`
 
 ### Vault
-Screen: [lib/features/vault/vault_screen.dart](lib/features/vault/vault_screen.dart)
-- A private folder inside app storage (`PDFNovaVault/`) that other apps cannot browse.
-- **Unlock with fingerprint, face, or device PIN/pattern** (`local_auth`, biometric-only off so device credentials work as a fallback).
-- **Fails closed**: if the device has no biometric and no screen lock, the vault stays locked and explains how to set one up.
-- Once unlocked: list files, open a file, delete a file, add a PDF.
+Screen: [lib/features/vault/vault_screen.dart](lib/features/vault/vault_screen.dart) · Service: [lib/services/vault_service.dart](lib/services/vault_service.dart) · Details: [docs/SECURITY.md](docs/SECURITY.md)
+- **AES-256-GCM encrypted** (authenticated), key in Android Keystore / iOS Keychain (this device only). File names are encrypted too.
+- **Unlock with fingerprint, face, or device PIN/pattern**; **fails closed** with no screen lock. Re-locks when you leave the app; decrypted viewing copies live only in private temp storage and are wiped on lock.
+- Tampered or damaged files are detected and kept (never auto-deleted).
+- **Migration:** files from the old unencrypted vault are offered for encryption; each is verified (decrypt + checksum) before its plain copy is removed. Failures leave the original untouched.
+- Excluded from Android cloud backup / device transfer (the key cannot be restored elsewhere).
 
 ---
 
+## 5. Smart tools
 ## 5. Smart tools
 
 ### Scan (Android only)
@@ -226,14 +235,15 @@ Screen: [lib/features/formfill/formfill_screen.dart](lib/features/formfill/formf
 - Output: `filled_<timestamp>.pdf`
 
 ### Quick Notes
-Screen: [lib/features/notes/notes_screen.dart](lib/features/notes/notes_screen.dart)
-- Title and body editor.
-- **Save as PDF**: title (22 pt bold), timestamp line, divider, then the body with automatic pagination for long notes.
-- Saved notes appear under the **Notes** folder in Recents, with an **Open** action in the snackbar.
-- On Android, pinning this tool to the home screen adds the [Quick Note widget](#quick-note-widget).
+Screen: [lib/features/notes/notes_screen.dart](lib/features/notes/notes_screen.dart) · Store: [lib/services/notes_store.dart](lib/services/notes_store.dart)
+- **One quick note, shared with the Android Home-Screen widget** (same storage). Autosaves as you type, saves when the app is backgrounded, and picks up widget edits when you return.
+- If the note was edited in both places at once, **both versions are kept** (merged), never overwritten.
+- **Save PDF** exports title, date and body through the same Unicode-correct writer as Word → PDF, into the PDFNova folder; it appears in Files under **Notes**.
+- iOS (no widget): the note is stored in the app.
 
 ---
 
+## 6. More tools
 ## 6. More tools
 
 ### Page numbers
@@ -283,13 +293,15 @@ Shell: [lib/features/home/home_shell.dart](lib/features/home/home_shell.dart)
 - **Long-press a tool card** (Android) → *Add to Home Screen* dialog → pins a launcher shortcut for that tool (Android 8+). See [section 8](#8-android-home-screen-widgets--shortcuts).
 
 ### Files tab
-Screen: [lib/features/files/files_tab.dart](lib/features/files/files_tab.dart)
-- Last **20 outputs** are remembered (Hive).
-- **By tool**: folder cards with the tool's tinted icon, file count and "Latest 2h ago". Tapping one grows it into the [folder screen](lib/features/files/folder_screen.dart).
-- **All files**: rows showing file type, name, "Tool · time ago · size".
-- Each row's **⋯ menu** opens a sheet: Open · Share · Save to Downloads · Delete (with confirmation). Deleting also removes it from Recents.
-- Files that no longer exist on the phone say so, and can be removed from the list.
-- Empty state with a "Browse tools" shortcut.
+Screen: [lib/features/files/files_tab.dart](lib/features/files/files_tab.dart) · Data: `StorageService.history` (single source of truth)
+- **Output history** of up to **200 files** (every output of a run — e.g. all pages of PDF → Images — sharing a job id), with tool, time and size.
+- **By tool**: one folder per tool actually used, with count and latest time; opens with a container transform.
+- **All files**: **search by name**, **filter by type** (PDF · Word · Slides · Images · Text), **sort** (newest, oldest, name, largest).
+- **Multi-select** (long-press): Share, Remove from history, Delete.
+- Per-file menu: Open · Share · Save to Downloads · **Rename** (keeps extension, refuses to overwrite) · **Remove from history** (file stays) · **Delete file** (with confirmation).
+- **Safety:** rename/delete only ever touch files PDF Nova created inside its own storage; anything else can only be removed from the list. Sizes are read from disk each time.
+- Missing files are labelled, and **Clean up N** removes their entries in one tap.
+- Old history entries (from before this version) are upgraded in place without losing any.
 
 ### Success screen
 View: [lib/features/tool/success_view.dart](lib/features/tool/success_view.dart)
@@ -441,8 +453,9 @@ lib/
 | PDF editing | `syncfusion_flutter_pdf` (Community License) |
 | PDF rendering | `pdfx` (PDFium) |
 | Imaging | `image` |
-| Office files | `archive` (hand-built DOCX/PPTX zips) |
+| Office files | `archive` (hand-built, re-verified DOCX/PPTX zips) |
 | OCR & scanning | `google_mlkit_text_recognition`, `google_mlkit_document_scanner` |
+| Encryption | `cryptography` (AES-256-GCM) + `cryptography_flutter` (native), `flutter_secure_storage` (Keystore/Keychain) |
 | Storage | `hive`, `hive_flutter`, `path_provider` |
 | Files | `file_picker`, `image_picker`, `open_filex`, `share_plus` |
 | Signature | `signature` |
@@ -450,23 +463,21 @@ lib/
 | Speech | `flutter_tts` |
 | QR | `qr_flutter` |
 | UI & motion | `flutter_animate` (entrances), `animations` (container transform, shared axis, fade-through) |
-| Fonts | Inter + Instrument Serif, bundled as assets (no runtime download) |
-
----
+| Fonts (bundled, SIL OFL) | Inter, Instrument Serif (UI); Noto Sans + Noto Sans Devanagari/Bengali/Gujarati/Tamil/Telugu/Kannada/Malayalam (Unicode PDF output) |
+| Tests | `flutter_test`, `path_provider_platform_interface`, `plugin_platform_interface` |
 
 ## 12. Storage locations
 
 | What | Where |
 |---|---|
-| Tool outputs | `<app documents>/PDFNova/<name>_<timestamp>.<ext>` |
+| Tool outputs (incl. Notes PDFs) | `<app documents>/PDFNova/<name>_<timestamp>.<ext>` (older Notes PDFs: `<app documents>/<Title>_Note_<ts>.pdf`) |
 | PDF → Images | `<app documents>/PDFNova/images_<timestamp>/page_N.jpg` |
-| Notes PDFs | `<app documents>/<Title>_Note_<timestamp>.pdf` |
-| Vault | `<app documents>/PDFNovaVault/` |
+| Vault (encrypted) | `<app documents>/PDFNovaVault/<id>.nvd` + `<id>.nvm` |
+| Vault viewing copies | `<temp>/vault_open/` — wiped on lock |
+| Vault key | Android Keystore / iOS Keychain (via flutter_secure_storage) |
 | Saved by the user | `Download/PDFNova/` (public, Android) |
-| Recents, counters, theme | Hive boxes `recents` (last 20) and `settings` (incl. theme mode, reduce motion) |
-| Quick Note widget text | Android SharedPreferences `notes_widget_prefs` |
-
----
+| Output history, counters, theme | Hive boxes `recents` (≤200, schema v2) and `settings` |
+| Quick note | Android SharedPreferences `notes_widget_prefs` (shared with the widget); Hive on iOS |
 
 ## 13. Permissions
 
@@ -498,34 +509,40 @@ The re-enable plan is marked in code with `ADS DISABLED FOR RELEASE` comments (i
 
 ### By design
 - **Fit to size** and the lossy **Compress** pass produce image-based PDFs; text is no longer selectable. The UI says so.
-- **PDF → Word** puts a picture of each page *and* its editable text in the document, so the content appears twice per page. Layout-perfect, fully editable conversion is not possible offline.
-- **Word → PDF** keeps paragraph text only (no images, tables, fonts or styling).
+- **PDF → Word** can't reproduce exact layout *and* editability at once offline: pick Editable text or Exact look.
+- **Word → PDF** keeps text, headings and line breaks only (no images, tables or styling). Shaped-script paragraphs are images with a hidden text layer: they look right and are searchable, but are slightly heavier than vector text, and extracted text may lose the space between a Latin label and the shaped words.
 - **Syncfusion Community License** is free under US$1M revenue and ≤5 developers. Recheck before scaling.
 
-### Gaps found in the current code
-- **Word → PDF drops non-Latin text.** Characters outside Latin-1 (Tamil, Hindi, etc.) are replaced with spaces because it uses the built-in Helvetica font. Embedding a Unicode TrueType font would fix this.
-- **PDF → PPT stretches pages.** Portrait A4 pages are stretched to fill 4:3 landscape slides instead of being letterboxed.
-- **Vault is not encrypted.** Files are protected by app-private storage and the biometric gate only; on a rooted device or through a backup they are readable.
-- **Two separate "notes".** The in-app Quick Notes screen (saves PDFs) and the home-screen Quick Note widget (SharedPreferences text) do not share data.
-- **Notes PDFs are saved outside the `PDFNova/` output folder**, unlike every other tool.
-- **Split** supports one range per run (no "1-3, 7, 9-12").
-- **iOS `Info.plist`** is missing `NSFaceIDUsageDescription`, which Vault needs on Face ID devices.
-- **Unused Android resources**: `pdfnova_widget_info.xml`, `pdfnova_widget_layout.xml` and `pdfnova_widget_2x1.xml` are not registered in the manifest.
-- **iOS app icon** is still the Flutter default (the Android launcher icon uses the new mark).
-- **Tests**: [test/widget_test.dart](test/widget_test.dart) is a placeholder; no real unit or widget tests yet.
-- **README is out of date**: it lists 22 tools and says PDF ↔ Word is not possible offline.
+### Fixed in this version (were open)
+Word → PDF Unicode loss · PDF → Word duplicate content · PDF → PPT stretching · unencrypted vault · Notes app/widget split · Notes PDFs outside PDFNova · fake "PDF to Excel" folder · iOS Face ID string missing · placeholder tests · **pages getting the wrong size/rotation** in Merge (mixed sizes), Images → PDF (landscape photos) and Pages (rotations) — found by the new tests · header overflow with large system text · unhandled error log when a tool failed quickly · low-contrast secondary text (WCAG AA now met).
 
----
+### Still open
+- **iOS** is not verified on a device or simulator run (see Build & run). The Scan tool stays Android-only.
+- **WiFi Share** has no access token or multi-file sessions yet ([docs/SECURITY.md](docs/SECURITY.md)).
+- **Quick note** is not encrypted; vault screenshots are not blocked (`FLAG_SECURE`).
+- No cancellation for long-running tools; progress is an estimated ramp, not measured.
+- Compress / Fit to size / PDF → Images / PDF → PPT / OCR depend on platform plugins (PDFium, ML Kit) and are covered by device testing, not unit tests.
+- **Unused Android resources**: `pdfnova_widget_info.xml`, `pdfnova_widget_layout.xml`, `pdfnova_widget_2x1.xml` are not registered in the manifest.
+- README is out of date (tool count, PDF ↔ Word claims).
 
 ## 16. Build & run
 
 ```bash
 flutter pub get
+flutter test                # 80 tests: services, conversions, vault, history, widgets
 flutter run                 # debug on a connected device
 flutter build apk --release # Android release APK
 flutter build appbundle     # Play Store bundle
 ```
 
+**Working from an exFAT/FAT drive (e.g. PortableSSD):** macOS writes `._*` files there that break Gradle and the Flutter tool. Use the mirror script, which builds on the internal disk and copies APKs back to `build-local/`:
+
+```bash
+tool/local_build.sh test
+tool/local_build.sh build apk --debug --target-platform android-arm64
+tool/local_build.sh build apk --profile --target-platform android-arm64   # smaller, real animation speed
+```
+
 - **Release signing**: put credentials in `android/key.properties` (gitignored): `storeFile`, `storePassword`, `keyAlias`, `keyPassword`. Without it, release builds fall back to debug signing.
-- **Android**: `MainActivity` already extends `FlutterFragmentActivity` (required by `local_auth`). Java/Kotlin target 17.
-- **iOS**: add `NSFaceIDUsageDescription` before shipping Vault. Scan is hidden automatically.
+- **Android**: `MainActivity` extends `FlutterFragmentActivity` (required by `local_auth`). Java/Kotlin target 17. minSdk ≥ 23 (secure storage).
+- **iOS**: Face ID purpose string, app icons from the PDF Nova mark, and a launch screen in the Folio canvas colour (light/dark) are configured. Scan is hidden automatically.

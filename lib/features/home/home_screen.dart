@@ -106,8 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               if (q.isNotEmpty) ...[
                 if (matches.isEmpty)
-                  SliverToBoxAdapter(
-                      child: _NoMatch(query: _query.text.trim()))
+                  SliverToBoxAdapter(child: _NoMatch(query: _query.text.trim()))
                 else
                   _grid(matches, cardHeight),
               ] else
@@ -177,51 +176,56 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.nova;
     final t = Theme.of(context).textTheme;
-    return SizedBox(
-      height: height,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 14, 24, 18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              const NovaMark(size: 28),
-              const SizedBox(width: 10),
-              Text('PDF Nova', style: t.titleMedium),
-              const Spacer(),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: c.surface,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: c.border),
+    // [height] is a minimum: with large system text or a narrow screen the
+    // headline wraps further and the header grows instead of overflowing.
+    return ConstrainedBox(
+      constraints: BoxConstraints(minHeight: height),
+      child: IntrinsicHeight(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 14, 24, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                const NovaMark(size: 28),
+                const SizedBox(width: 10),
+                Text('PDF Nova', style: t.titleMedium),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: c.surface,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: c.border),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.lock_outline_rounded,
+                        size: 14, color: c.success),
+                    const SizedBox(width: 5),
+                    Text('On-device',
+                        style: t.labelMedium
+                            ?.copyWith(color: c.ink, fontSize: 12)),
+                  ]),
                 ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.lock_outline_rounded, size: 14, color: c.success),
-                  const SizedBox(width: 5),
-                  Text('On-device',
-                      style:
-                          t.labelMedium?.copyWith(color: c.ink, fontSize: 12)),
+              ]).enter(context, delayMs: 150),
+              const Spacer(),
+              Text.rich(
+                TextSpan(children: [
+                  const TextSpan(text: 'Every document,\n'),
+                  TextSpan(
+                      text: 'handled privately.',
+                      style: TextStyle(
+                          fontStyle: FontStyle.italic, color: c.accent)),
                 ]),
-              ),
-            ]).enter(context, delayMs: 150),
-            const Spacer(),
-            Text.rich(
-              TextSpan(children: [
-                const TextSpan(text: 'Every document,\n'),
-                TextSpan(
-                    text: 'handled privately.',
-                    style:
-                        TextStyle(fontStyle: FontStyle.italic, color: c.accent)),
-              ]),
-              style: t.displaySmall,
-            ).enter(context, delayMs: 250),
-            const SizedBox(height: 10),
-            Text('$toolCount tools. Nothing leaves your phone.',
-                    style: t.bodyMedium)
-                .enter(context, delayMs: 330),
-          ],
+                style: t.displaySmall,
+              ).enter(context, delayMs: 250),
+              const SizedBox(height: 10),
+              Text('$toolCount tools. Nothing leaves your phone.',
+                      style: t.bodyMedium)
+                  .enter(context, delayMs: 330),
+            ],
+          ),
         ),
       ),
     );

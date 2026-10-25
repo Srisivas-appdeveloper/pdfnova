@@ -105,3 +105,6 @@ test/.test_coverage.dart
 *.log
 *.bak
 *.orig
+
+# Outputs copied back by tool/local_build.sh
+build-local/

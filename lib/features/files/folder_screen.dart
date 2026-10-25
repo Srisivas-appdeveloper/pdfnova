@@ -29,8 +29,8 @@ class _FolderScreenState extends State<FolderScreen> {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final items = StorageService.instance.recents
-        .where((r) => r['tool'] == widget.title)
+    final items = StorageService.instance.history
+        .where((r) => r.tool == widget.title)
         .toList();
     return Scaffold(
       backgroundColor: context.nova.canvas,
@@ -71,7 +71,7 @@ class _FolderScreenState extends State<FolderScreen> {
           for (final (i, r) in items.indexed)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: FileRow(item: r, onChanged: () => setState(() {}))
+              child: FileRow(record: r, onChanged: () => setState(() {}))
                   .enter(context, index: i, delayMs: 80),
             ),
         ],

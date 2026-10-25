@@ -144,12 +144,63 @@ class FileService {
     return path;
   }
 
+  // ---- Generated-output management ---------------------------------------
+
+  /// True when [path] is a file the app generated inside its own storage
+  /// (the PDFNova output folder or saved Notes). Only such files may be
+  /// renamed or deleted from the Files tab; anything else can only be
+  /// removed from the history list, never touched on disk.
+  Future<bool> isAppOutput(String path) async {
+    final docs = (await getApplicationDocumentsDirectory()).absolute.path;
+    final abs = File(path).absolute.path;
+    if (abs.contains('/../')) return false;
+    return abs.startsWith('$docs/PDFNova/') ||
+        (abs.startsWith('$docs/') &&
+            !abs.substring(docs.length + 1).contains('/') &&
+            abs.contains('_Note_'));
+  }
+
+  /// Deletes a generated output. Refuses (returns false) for files outside
+  /// app storage. Missing files count as already deleted.
+  Future<bool> deleteOutput(String path) async {
+    if (!await isAppOutput(path)) return false;
+    final f = File(path);
+    if (f.existsSync()) await f.delete();
+    return true;
+  }
+
+  /// Renames a generated output in place, keeping its extension. Returns the
+  /// new path. Throws [FileSystemException] if the name is taken, and
+  /// [ArgumentError] for empty names or files outside app storage.
+  Future<String> renameOutput(String path, String newBaseName) async {
+    if (!await isAppOutput(path)) {
+      throw ArgumentError('Only files created by PDF Nova can be renamed.');
+    }
+    final clean = newBaseName
+        .trim()
+        .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1F]'), '_')
+        .replaceAll(RegExp(r'^\.+'), '');
+    if (clean.isEmpty) throw ArgumentError('Name cannot be empty.');
+    final src = File(path);
+    final name = path.split('/').last;
+    final dot = name.lastIndexOf('.');
+    final ext = dot > 0 ? name.substring(dot) : '';
+    final dir = path.substring(0, path.length - name.length);
+    final dest = '$dir$clean$ext';
+    if (dest == path) return path;
+    if (File(dest).existsSync()) {
+      throw FileSystemException('A file with that name already exists', dest);
+    }
+    await src.rename(dest);
+    return dest;
+  }
+
   Future<void> share(String path) =>
       Share.shareXFiles([XFile(path)], text: 'Made with PDF Nova');
 
-  Future<void> shareAll(List<String> paths) => Share.shareXFiles(
-      [for (final p in paths) XFile(p)],
-      text: 'Made with PDF Nova');
+  Future<void> shareAll(List<String> paths) =>
+      Share.shareXFiles([for (final p in paths) XFile(p)],
+          text: 'Made with PDF Nova');
 }
 
 class PickedPdf {

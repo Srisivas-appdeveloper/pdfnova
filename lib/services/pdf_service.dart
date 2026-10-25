@@ -7,7 +7,8 @@ import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'raster_service.dart';
-import 'ocr_service.dart';
+import 'document_text_service.dart';
+import 'tool_notes.dart';
 
 /// All PDF operations. Pure Dart via Syncfusion (Community License) plus
 /// PDFium rendering (pdfx) for raster-based features. Every byte stays
@@ -32,11 +33,29 @@ class PdfService {
     return path;
   }
 
+  /// Adds a page with its own size and rotation. Syncfusion applies page
+  /// settings per *section*, so changing `doc.pageSettings` between pages of
+  /// one section would give later pages the first page's size/rotation
+  /// (mixed-size merges, landscape photos, rotated pages). One section per
+  /// page keeps every page exactly as requested.
+  static PdfPage _newPage(PdfDocument doc, Size size,
+      {PdfPageRotateAngle rotate = PdfPageRotateAngle.rotateAngle0}) {
+    final section = doc.sections!.add();
+    section.pageSettings
+      // Orientation must match or Syncfusion swaps width/height back to
+      // portrait.
+      ..orientation = size.width > size.height
+          ? PdfPageOrientation.landscape
+          : PdfPageOrientation.portrait
+      ..size = size
+      ..margins.all = 0
+      ..rotate = rotate;
+    return section.pages.add();
+  }
+
   void _copyPage(PdfDocument out, PdfPage srcPage,
       {PdfPageRotateAngle rotate = PdfPageRotateAngle.rotateAngle0}) {
-    out.pageSettings.size = srcPage.size;
-    out.pageSettings.rotate = rotate;
-    out.pages.add().graphics.drawPdfTemplate(
+    _newPage(out, srcPage.size, rotate: rotate).graphics.drawPdfTemplate(
         srcPage.createTemplate(), const Offset(0, 0), srcPage.size);
   }
 
@@ -112,20 +131,18 @@ class PdfService {
     return [await _save(doc, 'protected')];
   }
 
-  void _addFormattedPage(PdfDocument doc, Uint8List imageBytes, {int? imgW, int? imgH}) {
+  void _addFormattedPage(PdfDocument doc, Uint8List imageBytes,
+      {int? imgW, int? imgH}) {
     final bitmap = PdfBitmap(imageBytes);
     final width = (imgW ?? bitmap.width).toDouble();
     final height = (imgH ?? bitmap.height).toDouble();
     final isLandscape = width > height;
 
     // Standard A4 document dimensions (595.28 x 841.89 pt)
-    final pageSize = isLandscape
-        ? const Size(841.89, 595.28)
-        : const Size(595.28, 841.89);
+    final pageSize =
+        isLandscape ? const Size(841.89, 595.28) : const Size(595.28, 841.89);
 
-    doc.pageSettings.margins.all = 0;
-    doc.pageSettings.size = pageSize;
-    final page = doc.pages.add();
+    final page = _newPage(doc, pageSize);
 
     // Use page.getClientSize() to guarantee 100% fit within the drawable page canvas
     final clientW = page.getClientSize().width;
@@ -212,8 +229,8 @@ class PdfService {
   Future<List<String>> watermark(Uint8List input, String text,
       {double opacity = 0.25}) async {
     final doc = PdfDocument(inputBytes: input);
-    final font = PdfStandardFont(PdfFontFamily.helvetica, 48,
-        style: PdfFontStyle.bold);
+    final font =
+        PdfStandardFont(PdfFontFamily.helvetica, 48, style: PdfFontStyle.bold);
     for (var i = 0; i < doc.pages.count; i++) {
       final page = doc.pages[i];
       final g = page.graphics;
@@ -252,14 +269,22 @@ class PdfService {
   Future<List<String>> pdfToImages(Uint8List input) =>
       RasterService.instance.renderToFiles(input, scale: 2.0);
 
-  /// PDF → plain text via Syncfusion's extractor with automatic OCR fallback for scanned PDFs.
+  /// PDF → plain text. Uses each page's text layer, and on-device OCR only
+  /// for pages without one (scanned pages).
   Future<List<String>> pdfToText(Uint8List input) async {
-    final doc = PdfDocument(inputBytes: input);
-    final text = PdfTextExtractor(doc).extractText();
-    doc.dispose();
-    if (text.trim().length < 10) {
-      // Automatic OCR fallback for scanned image PDFs
-      return OcrService.instance.ocrPdf(input);
+    final pages = await DocumentTextService.instance.extract(input);
+    if (pages.every((p) => p.isEmpty)) {
+      throw Exception('NoText: nothing recognisable on these pages');
+    }
+    final text = pages.length == 1
+        ? pages.first.text
+        : [
+            for (final p in pages)
+              '───── Page ${p.page} ─────\n${p.text.trim()}\n'
+          ].join('\n');
+    if (pages.any((p) => p.source == TextSource.ocr)) {
+      ToolNotes.add(
+          'Some pages were scanned images and were read with on-device OCR — check names and numbers.');
     }
     final path = await outPath('extracted', ext: 'txt');
     await File(path).writeAsString(text, flush: true);
@@ -280,8 +305,8 @@ class PdfService {
       final w = font.measureString(label).width;
       page.graphics.drawString(label, font,
           brush: PdfBrushes.dimGray,
-          bounds: Rect.fromLTWH(
-              (size.width - w) / 2, size.height - 26, w + 4, 16));
+          bounds:
+              Rect.fromLTWH((size.width - w) / 2, size.height - 26, w + 4, 16));
     }
     return [await _save(doc, 'numbered')];
   }
@@ -289,10 +314,10 @@ class PdfService {
   /// Corner stamp like PAID / APPROVED — bold, rotated, coloured.
   Future<List<String>> stamp(Uint8List input, String text, Color color) async {
     final doc = PdfDocument(inputBytes: input);
-    final font = PdfStandardFont(PdfFontFamily.helvetica, 26,
-        style: PdfFontStyle.bold);
-    final pdfColor = PdfColor(
-        (color.value >> 16) & 0xFF, (color.value >> 8) & 0xFF, color.value & 0xFF);
+    final font =
+        PdfStandardFont(PdfFontFamily.helvetica, 26, style: PdfFontStyle.bold);
+    final pdfColor = PdfColor((color.value >> 16) & 0xFF,
+        (color.value >> 8) & 0xFF, color.value & 0xFF);
     final brush = PdfSolidBrush(pdfColor);
     final pen = PdfPen(pdfColor, width: 2);
     for (var i = 0; i < doc.pages.count; i++) {
@@ -302,8 +327,7 @@ class PdfService {
       g.setTransparency(0.85);
       g.translateTransform(doc.pages[i].getClientSize().width - w - 60, 70);
       g.rotateTransform(-12);
-      g.drawRectangle(
-          pen: pen, bounds: Rect.fromLTWH(-10, -8, w + 20, 44));
+      g.drawRectangle(pen: pen, bounds: Rect.fromLTWH(-10, -8, w + 20, 44));
       g.drawString(text, font,
           brush: brush, bounds: Rect.fromLTWH(0, 0, w + 10, 34));
       g.restore(state);
@@ -337,7 +361,8 @@ class PdfService {
     final fields = <(int, String, String)>[];
     for (var i = 0; i < doc.form.fields.count; i++) {
       final f = doc.form.fields[i];
-      if (f is PdfTextBoxField) fields.add((i, f.name ?? 'Field ${i + 1}', f.text));
+      if (f is PdfTextBoxField)
+        fields.add((i, f.name ?? 'Field ${i + 1}', f.text));
     }
     doc.dispose();
     return fields;
@@ -425,8 +450,7 @@ Future<List<String>> _compressToTargetImpl(
     (scale: 0.7, quality: 30),
   ];
   for (final a in attempts) {
-    final pages =
-        await RasterService.instance.renderAll(input, scale: a.scale);
+    final pages = await RasterService.instance.renderAll(input, scale: a.scale);
     final jpegs = <Uint8List>[];
     var total = 0;
     for (final png in pages) {

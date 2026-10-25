@@ -1,6 +1,9 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../services/storage_service.dart';
+import '../../services/tool_notes.dart';
+
+export '../../services/tool_notes.dart';
 import '../home/tools.dart';
 
 // ---- Events ------------------------------------------------------------
@@ -40,10 +43,14 @@ class ToolProcessing extends ToolState {
 }
 
 class ToolSuccess extends ToolState {
-  const ToolSuccess(this.paths);
+  const ToolSuccess(this.paths, {this.notes = const []});
   final List<String> paths;
+
+  /// Honest caveats about the result (e.g. text that could not be
+  /// embedded), shown under the result. Empty for a clean result.
+  final List<String> notes;
   @override
-  List<Object?> get props => [paths];
+  List<Object?> get props => [paths, notes];
 }
 
 class ToolFailure extends ToolState {
@@ -63,7 +70,14 @@ class ToolBloc extends Bloc<ToolEvent, ToolState> {
     emit(const ToolProcessing(0));
     try {
       var done = false;
-      final work = e.task().whenComplete(() => done = true);
+      final notes = <String>[];
+      final work =
+          ToolNotes.collect(notes, e.task).whenComplete(() => done = true);
+      // The task may fail while the ramp below is still waiting; without a
+      // listener that error would be reported as unhandled before the
+      // `await work` further down catches it. ignore() only marks it as
+      // observed — awaiting still rethrows.
+      work.ignore();
 
       var p = 0.0;
       while (!done && p < 0.9) {
@@ -80,9 +94,9 @@ class ToolBloc extends Bloc<ToolEvent, ToolState> {
         emit(const ToolIdle());
         return;
       }
-      await StorageService.instance.addRecent(paths.first, e.tool.title);
+      await StorageService.instance.addOutputs(paths, e.tool.title);
       await StorageService.instance.incrementOps();
-      emit(ToolSuccess(paths));
+      emit(ToolSuccess(paths, notes: notes));
     } catch (err) {
       if (isClosed) return;
       final text = err.toString();

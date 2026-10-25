@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 /// Hive-backed local storage. Two boxes:
 ///  - settings: counters used for ad frequency capping, appearance prefs
-///  - recents:  last 20 output files for the home screen "Recent" rail
+///  - recents:  output history — the single source of truth for files the
+///              app has generated (shown in the Files tab)
 class StorageService {
   StorageService._();
   static final StorageService instance = StorageService._();
@@ -11,8 +13,13 @@ class StorageService {
   late Box _settings;
   late Box _recents;
 
-  Future<void> init() async {
-    await Hive.initFlutter();
+  /// [hivePath] lets tests use a temp directory instead of the app's.
+  Future<void> init({String? hivePath}) async {
+    if (hivePath != null) {
+      Hive.init(hivePath);
+    } else {
+      await Hive.initFlutter();
+    }
     _settings = await Hive.openBox('settings');
     _recents = await Hive.openBox('recents');
     themeMode.value = ThemeMode.values.firstWhere(
@@ -20,6 +27,7 @@ class StorageService {
       orElse: () => ThemeMode.system,
     );
     reduceMotion.value = _settings.get('reduceMotion', defaultValue: false);
+    await _upgradeRecents();
   }
 
   // ---- Appearance ------------------------------------------------------
@@ -53,25 +61,131 @@ class StorageService {
   Future<void> markInterstitialShown() =>
       _settings.put('lastInterstitialAt', completedOps);
 
-  // ---- Recent files ----------------------------------------------------
-  List<Map<String, dynamic>> get recents {
+  // ---- Output history (Files tab) ---------------------------------------
+  /// Most entries kept. Older ones drop off the history only — the files
+  /// themselves are never deleted by this cap.
+  static const historyLimit = 200;
+  static const _schema = 2;
+
+  List<OutputRecord> get history {
     final raw = _recents.get('list', defaultValue: <dynamic>[]) as List;
-    return raw
-        .whereType<Map>()
-        .map((e) => e.map((k, v) => MapEntry(k.toString(), v)))
-        .toList();
+    return [
+      for (final e in raw.whereType<Map>())
+        if (OutputRecord.tryParse(e) case final r?) r
+    ];
   }
 
-  Future<void> addRecent(String path, String tool) async {
-    final list = recents.toList()
-      ..insert(0, {
+  /// Back-compat view used by older call sites.
+  List<Map<String, dynamic>> get recents =>
+      [for (final r in history) r.toMap()];
+
+  Future<void> _save(List<OutputRecord> list) => _recents
+      .put('list', [for (final r in list.take(historyLimit)) r.toMap()]);
+
+  /// v1 entries had only path/tool/time and at most 20 rows. Fill in size
+  /// and job id where the file still exists; never drops entries.
+  Future<void> _upgradeRecents() async {
+    if ((_settings.get('recentsSchema', defaultValue: 1) as int) >= _schema) {
+      return;
+    }
+    await _save([for (final r in history) r.withMeasuredSize()]);
+    await _settings.put('recentsSchema', _schema);
+  }
+
+  /// Records every output of one operation (multi-output tools such as
+  /// PDF → Images share a [OutputRecord.job] id).
+  Future<void> addOutputs(List<String> paths, String tool) async {
+    final job = DateTime.now().microsecondsSinceEpoch.toString();
+    final now = DateTime.now();
+    final fresh = [
+      for (final p in paths)
+        OutputRecord(path: p, tool: tool, time: now, job: job)
+            .withMeasuredSize()
+    ];
+    await _save([...fresh, ...history.where((r) => !paths.contains(r.path))]);
+  }
+
+  Future<void> addRecent(String path, String tool) => addOutputs([path], tool);
+
+  Future<void> removeRecent(String path) => removeRecents({path});
+
+  Future<void> removeRecents(Set<String> paths) =>
+      _save(history.where((r) => !paths.contains(r.path)).toList());
+
+  Future<void> renameRecent(String from, String to) => _save(
+      [for (final r in history) r.path == from ? r.copyWith(path: to) : r]);
+
+  /// Drops history rows whose file no longer exists. Returns how many.
+  Future<int> pruneMissing() async {
+    final all = history;
+    final kept = all.where((r) => File(r.path).existsSync()).toList();
+    await _save(kept);
+    return all.length - kept.length;
+  }
+}
+
+/// One generated file in the output history.
+class OutputRecord {
+  const OutputRecord({
+    required this.path,
+    required this.tool,
+    required this.time,
+    this.bytes,
+    this.job,
+  });
+
+  final String path;
+  final String tool;
+  final DateTime time;
+
+  /// Size when recorded (null for legacy rows whose file was gone).
+  final int? bytes;
+
+  /// Groups outputs produced by the same run.
+  final String? job;
+
+  String get name => path.split('/').last;
+  String get extension {
+    final n = name.toLowerCase();
+    final dot = n.lastIndexOf('.');
+    return dot < 0 ? '' : n.substring(dot + 1);
+  }
+
+  bool get exists => File(path).existsSync();
+
+  /// Size on disk right now, falling back to the recorded size.
+  int? get currentBytes => exists ? File(path).lengthSync() : bytes;
+
+  static OutputRecord? tryParse(Map raw) {
+    final path = raw['path'];
+    if (path is! String || path.isEmpty) return null;
+    return OutputRecord(
+      path: path,
+      tool: raw['tool'] is String ? raw['tool'] as String : 'Other',
+      time: DateTime.tryParse('${raw['time']}') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      bytes: raw['bytes'] is int ? raw['bytes'] as int : null,
+      job: raw['job'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
         'path': path,
         'tool': tool,
-        'time': DateTime.now().toIso8601String(),
-      });
-    await _recents.put('list', list.take(20).toList());
-  }
+        'time': time.toIso8601String(),
+        if (bytes != null) 'bytes': bytes,
+        if (job != null) 'job': job,
+      };
 
-  Future<void> removeRecent(String path) => _recents.put(
-      'list', recents.where((r) => r['path'] != path).toList());
+  OutputRecord copyWith({String? path}) => OutputRecord(
+      path: path ?? this.path, tool: tool, time: time, bytes: bytes, job: job);
+
+  OutputRecord withMeasuredSize() => exists
+      ? OutputRecord(
+          path: path,
+          tool: tool,
+          time: time,
+          bytes: File(path).lengthSync(),
+          job: job)
+      : this;
 }

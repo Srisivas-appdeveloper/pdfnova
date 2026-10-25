@@ -20,11 +20,12 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 1900));
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: NovaMotion.splash);
   bool _navigated = false;
 
-  Animation<double> _span(double a, double b, [Curve curve = NovaMotion.emphasized]) =>
+  Animation<double> _span(double a, double b,
+          [Curve curve = NovaMotion.emphasized]) =>
       CurvedAnimation(parent: _c, curve: Interval(a, b, curve: curve));
 
   late final _zoom = _span(0, 1, Curves.easeOutCubic);
@@ -32,10 +33,20 @@ class _SplashScreenState extends State<SplashScreen>
   late final _word = _span(0.38, 0.72);
   late final _tag = _span(0.55, 0.85);
 
+  bool _started = false;
+
   @override
-  void initState() {
-    super.initState();
-    _c.forward().whenComplete(_go);
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (NovaMotion.reduced(context)) {
+      // Less motion: show the finished mark briefly, then fade to Home.
+      _c.value = 1;
+      Future.delayed(NovaMotion.splashReduced, _go);
+    } else {
+      _c.forward().whenComplete(_go);
+    }
   }
 
   @override
@@ -48,7 +59,8 @@ class _SplashScreenState extends State<SplashScreen>
     if (_navigated || !mounted) return;
     _navigated = true;
     Navigator.of(context).pushReplacement(PageRouteBuilder(
-      transitionDuration: const Duration(milliseconds: 750),
+      transitionDuration:
+          NovaMotion.reduced(context) ? NovaMotion.quick : NovaMotion.handover,
       pageBuilder: (_, __, ___) => const HomeShell(),
       transitionsBuilder: (_, anim, __, child) => FadeTransition(
         opacity: CurvedAnimation(
@@ -78,8 +90,7 @@ class _SplashScreenState extends State<SplashScreen>
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               AnimatedBuilder(
                 animation: _mark,
-                builder: (_, __) =>
-                    NovaMark(size: 76, progress: _mark.value),
+                builder: (_, __) => NovaMark(size: 76, progress: _mark.value),
               ),
               const SizedBox(height: 26),
               // Wordmark rises out of a clip, like type set into a page.

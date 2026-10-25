@@ -9,6 +9,7 @@ import '../../core/widgets/nova_controls.dart';
 import '../../core/widgets/nova_entrance.dart';
 import '../../services/file_service.dart';
 import '../files/file_row.dart';
+import 'tool_header.dart';
 // ADS DISABLED FOR RELEASE — re-enable: import ad_service.dart and route the
 // actions in _withAd through AdService.instance.showRewardedThen.
 
@@ -16,8 +17,9 @@ import '../files/file_row.dart';
 /// then the output file card(s) and actions. One output → Open / Save /
 /// Share; many (batch, PDF → images) → a list with Share all.
 class SuccessView extends StatelessWidget {
-  const SuccessView({super.key, required this.paths});
+  const SuccessView({super.key, required this.paths, this.notes = const []});
   final List<String> paths;
+  final List<String> notes;
 
   void _withAd(void Function() action) => action();
 
@@ -58,6 +60,9 @@ class SuccessView extends StatelessWidget {
           Text('Saved privately in the app. Save or share it below.',
                   style: t.bodyMedium, textAlign: TextAlign.center)
               .enter(context, delayMs: 420),
+          for (final n in notes)
+            ToolNote(n, icon: Icons.info_outline_rounded)
+                .enter(context, delayMs: 440),
           const SizedBox(height: 24),
           Expanded(
             child: ListView.separated(
@@ -102,8 +107,7 @@ class SuccessView extends StatelessWidget {
             NovaButton(
               label: many ? 'Open first file' : 'Open',
               icon: Icons.open_in_new_rounded,
-              onPressed: () =>
-                  _withAd(() => openAnyFile(context, paths.first)),
+              onPressed: () => _withAd(() => openAnyFile(context, paths.first)),
             ),
             const SizedBox(height: 10),
             Row(children: [
@@ -111,8 +115,7 @@ class SuccessView extends StatelessWidget {
                 child: NovaButton.secondary(
                   label: 'Save',
                   icon: Icons.download_rounded,
-                  onPressed: () =>
-                      _withAd(() => _save(context, paths.first)),
+                  onPressed: () => _withAd(() => _save(context, paths.first)),
                 ),
               ),
               const SizedBox(width: 10),
@@ -143,8 +146,8 @@ class _DoneMark extends StatefulWidget {
 
 class _DoneMarkState extends State<_DoneMark>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 900));
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: NovaMotion.celebrate);
 
   @override
   void didChangeDependencies() {
@@ -165,7 +168,8 @@ class _DoneMarkState extends State<_DoneMark>
     final ring = CurvedAnimation(
         parent: _c, curve: const Interval(0, 0.55, curve: Curves.easeOutBack));
     final tick = CurvedAnimation(
-        parent: _c, curve: const Interval(0.35, 0.85, curve: Curves.easeOutCubic));
+        parent: _c,
+        curve: const Interval(0.35, 0.85, curve: Curves.easeOutCubic));
     final pulse = CurvedAnimation(
         parent: _c, curve: const Interval(0.3, 1, curve: Curves.easeOut));
     return SizedBox.square(

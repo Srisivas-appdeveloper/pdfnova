@@ -18,6 +18,8 @@ class PdfNovaNotesWidgetProvider : AppWidgetProvider() {
     companion object {
         const val PREFS = "notes_widget_prefs"
         const val KEY_NOTE = "quick_note"
+        /** Last-write time (ms) — lets the app detect edits made here. */
+        const val KEY_UPDATED_AT = "quick_note_updated_at"
 
         /// Re-renders every placed Notes widget with the current saved text.
         fun updateAll(context: Context) {

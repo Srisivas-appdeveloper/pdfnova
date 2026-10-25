@@ -9,7 +9,11 @@ extension NovaEntrance on Widget {
   Widget enter(BuildContext context, {int index = 0, int delayMs = 0}) {
     if (NovaMotion.reduced(context)) return this;
     return animate(delay: (delayMs + 40 * (index % 8)).ms)
-        .fadeIn(duration: 420.ms, curve: Curves.easeOut)
-        .slideY(begin: 0.08, end: 0, duration: 520.ms, curve: NovaMotion.emphasized);
+        .fadeIn(duration: NovaMotion.entranceFade, curve: Curves.easeOut)
+        .slideY(
+            begin: 0.08,
+            end: 0,
+            duration: NovaMotion.entrance,
+            curve: NovaMotion.emphasized);
   }
 }

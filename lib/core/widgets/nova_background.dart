@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_motion.dart';
 
 /// Plain paper canvas behind a screen. Kept as a widget (not just the
 /// scaffold colour) so every screen shares one place to change it.
@@ -55,7 +56,7 @@ class NovaArt extends StatelessWidget {
       Transform.translate(
         offset: Offset(0, parallax * 0.5),
         child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 400),
+          duration: NovaMotion.artSwap,
           // Default layout is a loose Stack, which would let the image
           // shrink to its own aspect ratio instead of covering the box.
           layoutBuilder: (current, previous) => Stack(
@@ -79,12 +80,10 @@ class NovaArt extends StatelessWidget {
         // fade in during the flight so nothing pops when it lands.
         flightShuttleBuilder: (_, anim, dir, __, ___) =>
             Stack(fit: StackFit.expand, children: [
-          Image.asset(c.art,
-              fit: BoxFit.cover, alignment: Alignment.topCenter),
+          Image.asset(c.art, fit: BoxFit.cover, alignment: Alignment.topCenter),
           FadeTransition(
-            opacity: dir == HeroFlightDirection.push
-                ? anim
-                : ReverseAnimation(anim),
+            opacity:
+                dir == HeroFlightDirection.push ? anim : ReverseAnimation(anim),
             child: _fade(c),
           ),
         ]),

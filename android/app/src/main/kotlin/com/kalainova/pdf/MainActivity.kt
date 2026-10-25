@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
@@ -57,6 +58,31 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // Quick note shared with the Home Screen widget — one source of truth.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "pdfnova/notes")
+            .setMethodCallHandler { call, result ->
+                val prefs = getSharedPreferences(
+                    PdfNovaNotesWidgetProvider.PREFS, Context.MODE_PRIVATE)
+                when (call.method) {
+                    "getNote" -> result.success(mapOf(
+                        "text" to (prefs.getString(PdfNovaNotesWidgetProvider.KEY_NOTE, "") ?: ""),
+                        "updatedAt" to prefs.getLong(PdfNovaNotesWidgetProvider.KEY_UPDATED_AT, 0L)
+                    ))
+                    "setNote" -> {
+                        val text = call.argument<String>("text") ?: ""
+                        val updatedAt = call.argument<Number>("updatedAt")?.toLong()
+                            ?: System.currentTimeMillis()
+                        prefs.edit()
+                            .putString(PdfNovaNotesWidgetProvider.KEY_NOTE, text)
+                            .putLong(PdfNovaNotesWidgetProvider.KEY_UPDATED_AT, updatedAt)
+                            .apply()
+                        PdfNovaNotesWidgetProvider.updateAll(this)
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
 
         // Saves output files into the public Downloads/PDFNova folder via
         // MediaStore — the only way that works on Android 10+ scoped storage.

@@ -77,8 +77,10 @@ class ToolScreen extends StatelessWidget {
                         progress: s is ToolProcessing ? s.progress : 1,
                         label: _processingLabel(tool.id)),
                   ),
-                ToolSuccess s =>
-                  SuccessView(key: const ValueKey('success'), paths: s.paths),
+                ToolSuccess s => SuccessView(
+                    key: const ValueKey('success'),
+                    paths: s.paths,
+                    notes: s.notes),
                 _ => _InputView(key: const ValueKey('input'), tool: tool),
               },
             ),
@@ -129,6 +131,7 @@ class _InputViewState extends State<_InputView> {
   bool _aadhaarMode = true;
   int _targetKb = 500;
   Color _stampColor = _stampColors.first;
+  PdfToWordMode _wordMode = PdfToWordMode.editable;
 
   @override
   void dispose() {
@@ -207,8 +210,8 @@ class _InputViewState extends State<_InputView> {
     final bytes = _files.isNotEmpty ? _files.first.bytes : null;
     final Future<List<String>> Function() task = switch (widget.tool.id) {
       ToolId.merge => () => pdf.merge([for (final f in _files) f.bytes]),
-      ToolId.split => () => pdf.split(
-          bytes!, int.parse(_fromCtrl.text), int.parse(_toCtrl.text)),
+      ToolId.split => () =>
+          pdf.split(bytes!, int.parse(_fromCtrl.text), int.parse(_toCtrl.text)),
       ToolId.compress => () => pdf.compress(bytes!),
       ToolId.compressTarget => () =>
           pdf.compressToTarget(bytes!, _targetKb * 1024),
@@ -226,7 +229,8 @@ class _InputViewState extends State<_InputView> {
       ToolId.metadata => () => pdf.stripMetadata(bytes!),
       ToolId.pdfToImages => () => pdf.pdfToImages(bytes!),
       ToolId.pdfToText => () => pdf.pdfToText(bytes!),
-      ToolId.pdfToWord => () => ConversionService.instance.pdfToWord(bytes!),
+      ToolId.pdfToWord => () =>
+          ConversionService.instance.pdfToWord(bytes!, mode: _wordMode),
       ToolId.wordToPdf => () => ConversionService.instance.wordToPdf(bytes!),
       ToolId.pdfToPpt => () => ConversionService.instance.pdfToPpt(bytes!),
       ToolId.ocr => () => OcrService.instance.ocrPdf(bytes!),
@@ -271,6 +275,19 @@ class _InputViewState extends State<_InputView> {
           onChanged: (_) => setState(() {}),
         ),
       if (id == ToolId.compressTarget) _targetSize(),
+      if (id == ToolId.pdfToWord) ...[
+        NovaSegmented<PdfToWordMode>(
+          value: _wordMode,
+          onChanged: (m) => setState(() => _wordMode = m),
+          options: const [
+            (PdfToWordMode.editable, 'Editable text', Icons.edit_note_rounded),
+            (PdfToWordMode.layout, 'Exact look', Icons.image_outlined),
+          ],
+        ),
+        ToolNote(_wordMode == PdfToWordMode.editable
+            ? 'Real paragraphs you can edit, with alignment kept. Pictures and exact layout are not carried over; scanned pages are read with OCR.'
+            : 'Every page as a picture: looks identical to the PDF, but the text cannot be edited.'),
+      ],
       if (id == ToolId.watermark)
         NovaField(
           controller: _textCtrl,
@@ -301,7 +318,9 @@ class _InputViewState extends State<_InputView> {
                   : Icons.add_rounded,
               title: _pickTitle,
               hint: _pickHint,
-              done: (id == ToolId.imagesToPdf ? _images.length : _files.length) > 0,
+              done:
+                  (id == ToolId.imagesToPdf ? _images.length : _files.length) >
+                      0,
               onTap: _pick,
             ).enter(context, delayMs: 200),
             const SizedBox(height: 12),
@@ -335,8 +354,8 @@ class _InputViewState extends State<_InputView> {
                     ),
                     IconButton(
                       tooltip: 'Remove',
-                      icon: Icon(Icons.close_rounded,
-                          size: 18, color: c.inkLow),
+                      icon:
+                          Icon(Icons.close_rounded, size: 18, color: c.inkLow),
                       onPressed: () => setState(() => _files.removeAt(i)),
                     ),
                   ]),
@@ -364,8 +383,8 @@ class _InputViewState extends State<_InputView> {
                           decoration: BoxDecoration(
                               color: c.surface, shape: BoxShape.circle),
                           padding: const EdgeInsets.all(3),
-                          child: Icon(Icons.close_rounded,
-                              size: 14, color: c.ink),
+                          child:
+                              Icon(Icons.close_rounded, size: 14, color: c.ink),
                         ),
                       ),
                     ),
@@ -444,9 +463,9 @@ class _InputViewState extends State<_InputView> {
                 transitionBuilder: (child, a) => FadeTransition(
                   opacity: a,
                   child: SlideTransition(
-                    position: Tween(
-                            begin: const Offset(0, 0.25), end: Offset.zero)
-                        .animate(a),
+                    position:
+                        Tween(begin: const Offset(0, 0.25), end: Offset.zero)
+                            .animate(a),
                     child: child,
                   ),
                 ),

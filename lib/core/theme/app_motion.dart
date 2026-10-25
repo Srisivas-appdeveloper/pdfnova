@@ -11,6 +11,24 @@ abstract class NovaMotion {
   static const pageReverse = Duration(milliseconds: 360);
   static const container = Duration(milliseconds: 520);
 
+  /// Staggered "rise into place" entrances.
+  static const entranceFade = Duration(milliseconds: 420);
+  static const entrance = Duration(milliseconds: 520);
+
+  /// Launch: the splash sequence, then the hand-over to Home.
+  static const splash = Duration(milliseconds: 1900);
+  static const splashReduced = Duration(milliseconds: 500);
+  static const handover = Duration(milliseconds: 750);
+
+  /// The success check mark.
+  static const celebrate = Duration(milliseconds: 900);
+
+  /// Slow looping ambient motion (vault pulse, progress comet).
+  static const ambient = Duration(milliseconds: 1800);
+
+  /// Cross-fade when the background artwork changes with the theme.
+  static const artSwap = Duration(milliseconds: 400);
+
   /// Material 3 "emphasized" — the house curve.
   static const emphasized = Cubic(0.2, 0.0, 0.0, 1.0);
   static const decelerate = Cubic(0.05, 0.7, 0.1, 1.0);

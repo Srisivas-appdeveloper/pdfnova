@@ -76,13 +76,13 @@ class NovaColors extends ThemeExtension<NovaColors> {
     borderStrong: Color(0xFFCFC9BD),
     ink: Color(0xFF16161A),
     inkMid: Color(0xFF5C5A55),
-    inkLow: Color(0xFF8F8B83),
+    inkLow: Color(0xFF6F6B64), // 4.7:1 on canvas (WCAG AA)
     accent: Color(0xFF3550E6),
     accentSoft: Color(0xFFE6EAFD),
     onAccent: Color(0xFFFFFFFF),
-    success: Color(0xFF17915A),
+    success: Color(0xFF117A4C), // AA as text on canvas & successSoft
     successSoft: Color(0xFFDDF3E8),
-    danger: Color(0xFFD63B2F),
+    danger: Color(0xFFBC3127), // AA as text on canvas & dangerSoft
     dangerSoft: Color(0xFFFBE3E0),
     scrim: Color(0x6616161A),
     shadow: Color(0x1416161A),
@@ -104,7 +104,7 @@ class NovaColors extends ThemeExtension<NovaColors> {
     borderStrong: Color(0xFF3A3A40),
     ink: Color(0xFFF3F1EC),
     inkMid: Color(0xFFA8A59F),
-    inkLow: Color(0xFF75736E),
+    inkLow: Color(0xFF918E88), // 5.8:1 on canvas (WCAG AA)
     accent: Color(0xFF7C8FFF),
     accentSoft: Color(0xFF1E2347),
     onAccent: Color(0xFF0B0F2E),
@@ -151,7 +151,10 @@ class NovaColors extends ThemeExtension<NovaColors> {
       shadow: l(shadow, other.shadow),
       tints: [
         for (var i = 0; i < tints.length; i++)
-          (l(tints[i].$1, other.tints[i].$1), l(tints[i].$2, other.tints[i].$2)),
+          (
+            l(tints[i].$1, other.tints[i].$1),
+            l(tints[i].$2, other.tints[i].$2)
+          ),
       ],
       art: t < 0.5 ? art : other.art,
     );

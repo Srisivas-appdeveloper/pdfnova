@@ -18,8 +18,7 @@ class NovaProgress extends StatefulWidget {
 class _NovaProgressState extends State<NovaProgress>
     with SingleTickerProviderStateMixin {
   late final AnimationController _spin =
-      AnimationController(vsync: this, duration: const Duration(seconds: 2))
-        ..repeat();
+      AnimationController(vsync: this, duration: NovaMotion.ambient)..repeat();
 
   @override
   void dispose() {
@@ -117,7 +116,11 @@ class _RingPainter extends CustomPainter {
         colors: [arc.withValues(alpha: 0), arc.withValues(alpha: 0.35)],
         transform: GradientRotation(head - tail),
       ).createShader(rect);
-      canvas.drawArc(rect, head - tail, tail, false,
+      canvas.drawArc(
+          rect,
+          head - tail,
+          tail,
+          false,
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = stroke

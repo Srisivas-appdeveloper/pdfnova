@@ -11,8 +11,7 @@ class NovaEyebrow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(children: [
-        Text(text.toUpperCase(),
-            style: Theme.of(context).textTheme.labelSmall),
+        Text(text.toUpperCase(), style: Theme.of(context).textTheme.labelSmall),
         const Spacer(),
         if (trailing != null) trailing!,
       ]);
@@ -90,7 +89,9 @@ class NovaSegmented<T> extends StatelessWidget {
                 border: Border.all(color: c.border),
                 boxShadow: [
                   BoxShadow(
-                      color: c.shadow, blurRadius: 8, offset: const Offset(0, 2))
+                      color: c.shadow,
+                      blurRadius: 8,
+                      offset: const Offset(0, 2))
                 ],
               ),
             ),
@@ -150,9 +151,11 @@ class NovaField extends StatefulWidget {
     this.onChanged,
     this.textStyle,
     this.icon,
+    this.autofocus = false,
   });
 
   final TextEditingController controller;
+  final bool autofocus;
   final String hint;
   final String? label;
   final bool number;
@@ -215,6 +218,7 @@ class _NovaFieldState extends State<NovaField> {
               child: TextField(
                 controller: widget.controller,
                 focusNode: _focus,
+                autofocus: widget.autofocus,
                 obscureText: widget.obscure && _hide,
                 maxLines: widget.obscure ? 1 : widget.maxLines,
                 minLines: widget.minLines,
@@ -284,7 +288,10 @@ class NovaChip extends StatelessWidget {
       },
       child: AnimatedContainer(
         duration: NovaMotion.quick,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        // 44pt minimum touch target (Apple HIG); keeps chips tappable.
+        constraints: const BoxConstraints(minHeight: 44),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
           color: selected ? c.ink : c.surfaceAlt,
           borderRadius: BorderRadius.circular(12),
@@ -335,8 +342,8 @@ class NovaIconButton extends StatelessWidget {
         ),
         icon: AnimatedSwitcher(
           duration: NovaMotion.quick,
-          transitionBuilder: (child, a) =>
-              ScaleTransition(scale: a, child: FadeTransition(opacity: a, child: child)),
+          transitionBuilder: (child, a) => ScaleTransition(
+              scale: a, child: FadeTransition(opacity: a, child: child)),
           child: Icon(icon, key: ValueKey(icon), size: 20),
         ),
       ),
