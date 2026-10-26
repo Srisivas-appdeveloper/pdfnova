@@ -1,11 +1,10 @@
 import 'dart:io';
-import 'package:animations/animations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/app_motion.dart';
 import '../../../core/widgets/nova_button.dart';
 import '../../../core/widgets/nova_card.dart';
+import '../../../core/widgets/nova_open_container.dart';
 import '../../../core/widgets/nova_controls.dart';
 import '../../../core/widgets/nova_dialog.dart';
 import '../../../services/shortcut_service.dart';
@@ -25,22 +24,10 @@ class ToolCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.nova;
     final (fg, bg) = c.tint(sectionIndexOf(tool));
-    final reduced = NovaMotion.reduced(context);
     return Pressable(
-      child: OpenContainer(
-        transitionType: ContainerTransitionType.fadeThrough,
-        transitionDuration: reduced ? NovaMotion.quick : NovaMotion.container,
-        closedElevation: 0,
-        openElevation: 0,
-        closedColor: c.surface,
-        openColor: c.canvas,
-        middleColor: c.canvas,
-        closedShape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
-          side: BorderSide(color: c.border),
-        ),
-        onClosed: (_) => onClosed?.call(),
-        openBuilder: (_, __) => screenFor(tool),
+      child: NovaOpenContainer(
+        onClosed: onClosed,
+        openBuilder: (_) => screenFor(tool),
         closedBuilder: (context, open) => InkWell(
           onTap: () {
             // Drop search focus first, or closing the tool would hand focus

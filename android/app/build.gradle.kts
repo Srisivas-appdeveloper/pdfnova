@@ -63,3 +63,10 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // OCR's second pass (Hindi/Marathi…) uses ML Kit's Devanagari recognizer.
+    // The Flutter plugin only compiles against it; the app must ship it.
+    // Bundled model: works offline, no Play Services download.
+    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
+}

@@ -43,7 +43,10 @@ class WifiShareService {
         }
         final length = await file.length();
         req.response.headers
-          ..contentType = ContentType.binary
+          // Typed as PDF so the receiving phone's downloads offer a PDF app.
+          ..contentType = rawName.toLowerCase().endsWith('.pdf')
+              ? ContentType('application', 'pdf')
+              : ContentType.binary
           ..contentLength = length
           // Plain filename= is NOT percent-decoded by browsers, so a name like
           // "My Invoice.pdf" must go raw in the quoted form; the RFC 5987

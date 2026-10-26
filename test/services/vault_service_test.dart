@@ -141,6 +141,105 @@ void main() {
     expect(await vault.list(), isEmpty);
     expect(vaultDir.listSync().whereType<File>(), isEmpty);
   });
+  group('hardening', () {
+    test('truncated ciphertext is rejected', () async {
+      final e = await vault.add('t.pdf', doc);
+      final f = File('${vaultDir.path}/${e.id}.nvd');
+      final b = f.readAsBytesSync();
+      f.writeAsBytesSync(b.sublist(0, b.length - 40));
+      await expectLater(vault.read(e), throwsA(isA<VaultCorruptException>()));
+      f.writeAsBytesSync(b.sublist(0, 10)); // shorter than header + tag
+      await expectLater(vault.read(e), throwsA(isA<VaultCorruptException>()));
+    });
+
+    test('interrupted migration resumes without duplicating', () async {
+      vaultDir.createSync(recursive: true);
+      final legacy = File('${vaultDir.path}/old.pdf')..writeAsBytesSync(doc);
+      // Simulate a crash after the encrypted copy was written but before
+      // the plain original was removed.
+      await vault.add('old.pdf', doc);
+      expect(legacy.existsSync(), isTrue);
+
+      final report = await vault.migrateLegacy();
+      expect(report.migrated, ['old.pdf']);
+      expect(legacy.existsSync(), isFalse);
+      final list = await vault.list();
+      expect(list, hasLength(1), reason: 'no duplicate entry');
+      expect(await vault.read(list.single), doc);
+    });
+
+    test('a same-named but different legacy file is not merged away', () async {
+      vaultDir.createSync(recursive: true);
+      await vault.add('old.pdf', samplePdf(1, label: 'version A'));
+      File('${vaultDir.path}/old.pdf').writeAsBytesSync(doc);
+      await vault.migrateLegacy();
+      expect(await vault.list(), hasLength(2));
+    });
+
+    test('crash leftovers are cleaned, complete entries and legacy kept',
+        () async {
+      final keep = await vault.add('keep.pdf', doc);
+      File('${vaultDir.path}/abc.nvd.tmp').writeAsBytesSync([1, 2, 3]);
+      File('${vaultDir.path}/orphan.nvd').writeAsBytesSync([4, 5, 6]);
+      final legacy = File('${vaultDir.path}/legacy.pdf')..writeAsBytesSync(doc);
+      expect(await vault.cleanupIncomplete(), 2);
+      expect(File('${vaultDir.path}/orphan.nvd').existsSync(), isFalse);
+      expect(legacy.existsSync(), isTrue);
+      expect(await vault.read((await vault.list()).single), doc);
+      expect((await vault.list()).single.id, keep.id);
+    });
+
+    test('a failed write (e.g. disk full) leaves nothing behind', () async {
+      await vault.add('first.pdf', doc); // creates the key
+      final before = vaultDir.listSync().length;
+      Process.runSync('chmod', ['555', vaultDir.path]);
+      addTearDown(() => Process.runSync('chmod', ['755', vaultDir.path]));
+      await expectLater(vault.add('second.pdf', doc), throwsA(anything));
+      Process.runSync('chmod', ['755', vaultDir.path]);
+      expect(vaultDir.listSync(), hasLength(before));
+    });
+
+    test('unreadable legacy file fails migration and is kept', () async {
+      vaultDir.createSync(recursive: true);
+      final f = File('${vaultDir.path}/locked.pdf')..writeAsBytesSync(doc);
+      Process.runSync('chmod', ['000', f.path]);
+      addTearDown(() => Process.runSync('chmod', ['644', f.path]));
+      final r = await vault.migrateLegacy();
+      expect(r.failed.keys, ['locked.pdf']);
+      Process.runSync('chmod', ['644', f.path]);
+      expect(f.readAsBytesSync(), doc);
+      expect(await vault.list(), isEmpty);
+    });
+
+    test('key-store read failure never creates a replacement key', () async {
+      await vault.add('x.pdf', doc);
+      final throwing = VaultService(
+        vaultDir: () async => vaultDir,
+        tempDir: () async => tempDir,
+        keyStore: _ThrowingReadKeyStore(),
+      );
+      await expectLater(
+          throwing.list(), throwsA(isA<VaultKeyUnavailableException>()));
+      // still unreadable only through that store; original key untouched
+      expect(await vault.list(), hasLength(1));
+    });
+
+    test('a malformed stored key is rejected, not used', () async {
+      keys.key = Uint8List(7);
+      await expectLater(make().add('x.pdf', doc),
+          throwsA(isA<VaultKeyUnavailableException>()));
+    });
+
+    test('concurrent first use creates exactly one key', () async {
+      final v = make();
+      await Future.wait([v.add('a.pdf', doc), v.add('b.pdf', doc)]);
+      final list = await make().list(); // fresh instance, stored key
+      expect(list, hasLength(2));
+      for (final e in list) {
+        expect(await make().read(e), doc);
+      }
+    });
+  });
 }
 
 class _FailingKeyStore implements VaultKeyStore {
@@ -149,4 +248,12 @@ class _FailingKeyStore implements VaultKeyStore {
   @override
   Future<void> write(Uint8List key) async =>
       throw const FileSystemException('secure storage unavailable');
+}
+
+class _ThrowingReadKeyStore implements VaultKeyStore {
+  @override
+  Future<Uint8List?> read() async => throw Exception('KeyStore invalidated');
+  @override
+  Future<void> write(Uint8List key) async =>
+      fail('must never write a replacement key');
 }

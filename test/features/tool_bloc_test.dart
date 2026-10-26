@@ -36,12 +36,9 @@ void main() {
     expect(done.paths, [f.path]);
     expect(done.notes, ['heads-up']);
     expect(StorageService.instance.history.single.tool, 'Merge');
-    // Progress only ever moves forward.
-    final p =
-        states.whereType<ToolProcessing>().map((s) => s.progress).toList();
-    for (var i = 1; i < p.length; i++) {
-      expect(p[i], greaterThanOrEqualTo(p[i - 1]));
-    }
+    // No measured progress was reported, so none may be shown.
+    expect(states.whereType<ToolProcessing>().map((s) => s.progress),
+        everyElement(isNull));
   });
 
   test('wrong password maps to a helpful message', () async {

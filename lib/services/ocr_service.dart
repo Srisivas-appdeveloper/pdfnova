@@ -1,9 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:typed_data';
 import 'pdf_service.dart';
 import 'raster_service.dart';
+import 'tool_errors.dart';
 
 /// On-device OCR: render each PDF page to PNG, run ML Kit recognition,
 /// emit a .txt with page markers. Devanagari script instance is used as a
@@ -25,7 +27,7 @@ class OcrService {
       throw Exception('NoText: nothing recognisable on these pages');
     }
     final path = await PdfService.instance.outPath('ocr', ext: 'txt');
-    await File(path).writeAsString(text, flush: true);
+    await writeAtomic(path, utf8.encode(text));
     return [path];
   }
 

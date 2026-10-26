@@ -1,7 +1,8 @@
 # Nova Intelligence — Foundation Plan
 
-Status: **design + first building block shipped**. No AI model, embedding
-store or backend has been added. This document records what exists, what
+Status: **local content index + search shipped (Milestone G)**. No AI
+model, embedding store or backend has been added; Ask Nova (Milestone H)
+is not implemented — see §5. This document records what exists, what
 can be reused, and the smallest next steps, so a future assistant ("Ask
 Nova") can be built without disturbing the current offline tools.
 
@@ -46,5 +47,33 @@ abstract class LocalModel {          // future, behind a capability check
 
 Answers must cite `SearchHit.page`; if retrieval finds nothing, the assistant says so instead of answering.
 
-## 4. Explicitly out of scope for now
-No navigation changes, no "Ask Nova" entry point, no model download, no embeddings, no cloud calls.
+## 4. Shipped: local content index (Milestone G)
+
+[`DocumentIndex`](../lib/services/document_index.dart) — opt-in ("Search inside files" in Settings, off by default).
+
+| Aspect | Behaviour (all covered by tests) |
+|---|---|
+| Scope | Only PDFs in output history (files PDF Nova created). The vault is never indexed. |
+| Storage | `<app support>/content_index/<sha256(path)>.json`: path, SHA-256 fingerprint, indexed time, `[{page, text}]`. Written atomically. |
+| Extraction | Text layer via line extraction on a background isolate. No OCR: scanned pages are counted as unsearchable, not hidden. Locked/damaged PDFs are skipped. |
+| Change detection | Fingerprint compare; unchanged files are not re-extracted, changed files are re-indexed. |
+| Consistency | Hooked into history: add → index; rename → move; remove from history / prune missing → drop. `sync()` reconciles; "Rebuild index" starts fresh. |
+| Privacy | Turning the setting off deletes the whole index. Nothing leaves the device. |
+| Search | Case-insensitive phrase search → `SearchHit {path, page, snippet, match offsets}`; Files shows "Inside files" separately from file-name matches; a hit opens the Reader at that page (verified on device). |
+
+Not yet: ranking beyond page order, OCR'd text in the index, cancellation of a long sync, SQLite/FTS (plain JSON is enough at ≤200 documents).
+
+## 5. Ask Nova — not implemented (blocked on a decision)
+
+Grounded Q&A needs a language model. Before adding one, these must be decided by the product owner (they change app size, cost and privacy promises):
+
+1. **On-device vs remote.** On-device keeps the "nothing leaves your phone" promise but adds roughly 0.5–2 GB of model download and needs a recent phone. Remote is small but must be opt-in per question, disclosed, and never described as on-device.
+2. **Model + runtime**, after benchmarking on a mid-range Android phone: size, peak RAM, load time, tokens/s, Tamil/Hindi quality, licence.
+3. **Distribution:** explicit, user-confirmed model download (Play size limits rule out bundling).
+
+What already exists for it: page-associated text (`DocumentTextService`), retrieval with page references (`DocumentIndex.search`), open-at-page in the Reader. A first Ask Nova should answer only from retrieved passages, cite pages, and say "not found in this document" otherwise.
+
+Milestone I (controlled actions) depends on H and is also not started.
+
+## 6. Explicitly out of scope for now
+No "Ask Nova" entry point, no model download, no embeddings, no cloud calls until §5 is decided.

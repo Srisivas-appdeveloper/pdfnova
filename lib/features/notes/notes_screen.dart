@@ -5,10 +5,13 @@ import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/nova_button.dart';
 import '../../core/widgets/nova_card.dart';
+import '../../core/widgets/nova_controls.dart';
+import '../../core/widgets/nova_dialog.dart';
 import '../../core/widgets/nova_entrance.dart';
 import '../../services/file_service.dart';
 import '../../services/notes_store.dart';
 import '../../services/pdf_service.dart';
+import '../../services/tool_errors.dart';
 import '../../services/unicode_text_layout.dart';
 import '../../services/storage_service.dart';
 import '../home/tools.dart';
@@ -103,6 +106,79 @@ class _NotesScreenState extends State<NotesScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _showVersions() async {
+    await _flush();
+    final versions = await _store.versions();
+    if (!mounted) return;
+    showNovaSheet(
+      context: context,
+      builder: (sheet) {
+        final c = sheet.nova;
+        final t = Theme.of(sheet).textTheme;
+        String when(int ms) {
+          final d = DateTime.fromMillisecondsSinceEpoch(ms);
+          return '${d.day}/${d.month}/${d.year} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+        }
+
+        return SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Earlier versions', style: t.headlineSmall),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text(
+                  'Kept automatically (up to ${NotesStore.maxVersions}). Restoring keeps the current text as a version too.',
+                  style: t.bodySmall),
+            ),
+            if (versions.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('No earlier versions yet.', style: t.bodyMedium),
+              )
+            else
+              Flexible(
+                child: ListView(shrinkWrap: true, children: [
+                  for (final v in versions)
+                    ListTile(
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 24),
+                      leading: Icon(Icons.history_rounded, color: c.inkMid),
+                      title: Text(v.text.trim().split('\n').first,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(when(v.updatedAt)),
+                      trailing: TextButton(
+                        child: const Text('Restore'),
+                        onPressed: () async {
+                          Navigator.pop(sheet);
+                          final note = await _store.restore(v);
+                          _version = note.updatedAt;
+                          _bodyController
+                            ..removeListener(_onEdit)
+                            ..text = note.text
+                            ..addListener(_onEdit);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Version restored. The text it replaced is in Earlier versions.')));
+                          }
+                        },
+                      ),
+                    ),
+                ]),
+              ),
+            const SizedBox(height: 8),
+          ]),
+        );
+      },
+    );
+  }
+
   Future<void> _exportNoteToPdf() async {
     final titleText = _titleController.text.trim();
     final bodyText = _bodyController.text.trim();
@@ -137,7 +213,8 @@ class _NotesScreenState extends State<NotesScreen> with WidgetsBindingObserver {
 
       final safeName = title.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
       final outPath = await PdfService.instance.outPath('${safeName}_Note');
-      await File(outPath).writeAsBytes(bytes, flush: true);
+      PdfService.verifyPdf(bytes);
+      await writeAtomic(outPath, bytes);
 
       // Record in history under 'Notes'
       await StorageService.instance.addRecent(outPath, 'Notes');
@@ -188,6 +265,11 @@ class _NotesScreenState extends State<NotesScreen> with WidgetsBindingObserver {
       backgroundColor: c.canvas,
       appBar: AppBar(
         actions: [
+          NovaIconButton(
+            tooltip: 'Earlier versions',
+            icon: Icons.history_rounded,
+            onPressed: _showVersions,
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: SizedBox(

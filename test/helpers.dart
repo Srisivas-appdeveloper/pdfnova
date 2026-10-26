@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui' show Offset, Size;
+import 'dart:ui' show Offset, Rect, Size;
 import 'package:hive/hive.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:pdfnova/services/pdf_service.dart';
 import 'package:pdfnova/services/storage_service.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
@@ -32,6 +33,7 @@ class Sandbox {
   late Directory docs;
 
   Future<void> setUp() async {
+    PdfService.runInline = true;
     root = Directory.systemTemp.createTempSync('pdfnova_test_');
     PathProviderPlatform.instance = FakePathProvider(root);
     docs = Directory(
@@ -60,6 +62,20 @@ Uint8List samplePdf(int pages,
   final bytes = Uint8List.fromList(doc.saveSync());
   doc.dispose();
   return bytes;
+}
+
+/// A one-page AcroForm: empty `full_name`, and `city` = "Chennai".
+Uint8List formPdf() {
+  final doc = PdfDocument();
+  final page = doc.pages.add();
+  doc.form.fields.add(
+      PdfTextBoxField(page, 'full_name', const Rect.fromLTWH(40, 40, 200, 24)));
+  doc.form.fields.add(PdfTextBoxField(
+      page, 'city', const Rect.fromLTWH(40, 80, 200, 24),
+      text: 'Chennai'));
+  final b = Uint8List.fromList(doc.saveSync());
+  doc.dispose();
+  return b;
 }
 
 /// Text via line extraction — the same path the app uses (Syncfusion's

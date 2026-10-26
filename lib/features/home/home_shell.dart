@@ -64,8 +64,7 @@ class _HomeShellState extends State<HomeShell> {
     final page = switch (_tab) {
       0 => const HomeScreen(key: PageStorageKey('tools')),
       1 => FilesTab(
-          key: const PageStorageKey('files'),
-          onBrowseTools: () => _select(0)),
+          key: const PageStorageKey('files'), onBrowseTools: () => _select(0)),
       _ => const SettingsTab(key: PageStorageKey('settings')),
     };
     return PopScope(
@@ -111,79 +110,86 @@ class _NovaTabBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.nova;
     final t = Theme.of(context).textTheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border(top: BorderSide(color: c.border)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 68,
-          child: LayoutBuilder(builder: (context, box) {
-            final w = box.maxWidth / _items.length;
-            return Stack(children: [
-              // Sliding pill behind the active item.
-              AnimatedPositioned(
-                duration: NovaMotion.page,
-                curve: NovaMotion.emphasized,
-                left: w * index + (w - 92) / 2,
-                top: 10,
-                width: 92,
-                height: 48,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: c.accentSoft,
-                    borderRadius: BorderRadius.circular(16),
+    // Navigation labels scale with system text up to 1.5×, and the bar
+    // grows to fit them instead of clipping.
+    final scaler = MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.5);
+    final grow = scaler.scale(11.5) - 11.5;
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: scaler),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: c.surface,
+          border: Border(top: BorderSide(color: c.border)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 68 + grow * 1.4,
+            child: LayoutBuilder(builder: (context, box) {
+              final w = box.maxWidth / _items.length;
+              return Stack(children: [
+                // Sliding pill behind the active item.
+                AnimatedPositioned(
+                  duration: NovaMotion.page,
+                  curve: NovaMotion.emphasized,
+                  left: w * index + (w - 92) / 2,
+                  top: 10,
+                  width: 92,
+                  height: 48 + grow * 1.4,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: c.accentSoft,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
                 ),
-              ),
-              Row(children: [
-                for (final (i, (outline, filled, label)) in _items.indexed)
-                  Expanded(
-                    child: Semantics(
-                      selected: i == index,
-                      button: true,
-                      label: label,
-                      excludeSemantics: true,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => onSelect(i),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            AnimatedScale(
-                              scale: i == index ? 1.0 : 0.92,
-                              duration: NovaMotion.medium,
-                              curve: Curves.easeOutBack,
-                              child: AnimatedSwitcher(
-                                duration: NovaMotion.quick,
-                                child: Icon(
-                                  i == index ? filled : outline,
-                                  key: ValueKey(i == index),
-                                  size: 22,
-                                  color: i == index ? c.accent : c.inkLow,
+                Row(children: [
+                  for (final (i, (outline, filled, label)) in _items.indexed)
+                    Expanded(
+                      child: Semantics(
+                        selected: i == index,
+                        button: true,
+                        label: label,
+                        excludeSemantics: true,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => onSelect(i),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              AnimatedScale(
+                                scale: i == index ? 1.0 : 0.92,
+                                duration: NovaMotion.medium,
+                                curve: Curves.easeOutBack,
+                                child: AnimatedSwitcher(
+                                  duration: NovaMotion.quick,
+                                  child: Icon(
+                                    i == index ? filled : outline,
+                                    key: ValueKey(i == index),
+                                    size: 22,
+                                    color: i == index ? c.accent : c.inkLow,
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 3),
-                            AnimatedDefaultTextStyle(
-                              duration: NovaMotion.quick,
-                              style: t.labelSmall!.copyWith(
-                                letterSpacing: 0.2,
-                                fontSize: 11.5,
-                                color: i == index ? c.accent : c.inkLow,
+                              const SizedBox(height: 3),
+                              AnimatedDefaultTextStyle(
+                                duration: NovaMotion.quick,
+                                style: t.labelSmall!.copyWith(
+                                  letterSpacing: 0.2,
+                                  fontSize: 11.5,
+                                  color: i == index ? c.accent : c.inkLow,
+                                ),
+                                child: Text(label),
                               ),
-                              child: Text(label),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ]),
-            ]);
-          }),
+                ]),
+              ]);
+            }),
+          ),
         ),
       ),
     );

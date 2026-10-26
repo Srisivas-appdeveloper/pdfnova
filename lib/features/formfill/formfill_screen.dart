@@ -31,7 +31,7 @@ class FormFillScreen extends StatelessWidget {
           listener: (context, state) {
             if (state is ToolFailure) {
               ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text(state.message)));
+                  .showSnackBar(toolSnack(context, state.message));
             }
           },
           builder: (context, state) => ToolStages(

@@ -1,10 +1,11 @@
-import 'dart:typed_data';
+import 'dart:isolate';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 /// Picking, opening and sharing. Kept out of blocs so tools stay testable.
 class FileService {
@@ -212,5 +213,56 @@ class PickedPdf {
     return kb > 1024
         ? '${(kb / 1024).toStringAsFixed(1)} MB'
         : '${kb.toStringAsFixed(0)} KB';
+  }
+}
+
+/// Facts about a generated file, read from disk now. [pages] is null for
+/// non-PDFs or when the PDF can't be read (e.g. password-protected).
+class FileDetails {
+  const FileDetails({
+    required this.exists,
+    this.bytes,
+    this.modified,
+    this.pages,
+    this.locked = false,
+  });
+  final bool exists;
+  final int? bytes;
+  final DateTime? modified;
+  final int? pages;
+  final bool locked;
+
+  /// Reads size, modified time and (for PDFs) page count. The PDF parse
+  /// runs on a background isolate so large files never stall the UI.
+  static Future<FileDetails> read(String path) async {
+    final f = File(path);
+    if (!f.existsSync()) return const FileDetails(exists: false);
+    final stat = f.statSync();
+    int? pages;
+    var locked = false;
+    if (path.toLowerCase().endsWith('.pdf')) {
+      final r = await Isolate.run(() {
+        try {
+          final doc = PdfDocument(inputBytes: File(path).readAsBytesSync());
+          final n = doc.pages.count;
+          doc.dispose();
+          return n;
+        } catch (e) {
+          return e.toString().toLowerCase().contains('password') ? -1 : null;
+        }
+      });
+      if (r == -1) {
+        locked = true;
+      } else {
+        pages = r;
+      }
+    }
+    return FileDetails(
+      exists: true,
+      bytes: stat.size,
+      modified: stat.modified,
+      pages: pages,
+      locked: locked,
+    );
   }
 }

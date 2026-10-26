@@ -1,13 +1,14 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:typed_data';
-import 'dart:ui' show Color, Offset, Rect, Size;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'raster_service.dart';
 import 'document_text_service.dart';
+import 'tool_errors.dart';
 import 'tool_notes.dart';
 
 /// All PDF operations. Pure Dart via Syncfusion (Community License) plus
@@ -25,12 +26,59 @@ class PdfService {
     return '${out.path}/${name}_$stamp.$ext';
   }
 
-  Future<String> _save(PdfDocument doc, String name) async {
-    final bytes = await doc.save();
+  /// Saves [doc] as a new output — verified and written atomically.
+  /// The saved bytes are re-opened (with [password] if the output is
+  /// protected) and must contain every page the document had; only then is
+  /// the file written, via a temp file, so no half or broken output is ever
+  /// left in the PDFNova folder.
+  Future<String> _save(PdfDocument doc, String name, {String? password}) async {
+    final expected = doc.pages.count;
+    var bytes = await doc.save();
     doc.dispose();
+    verifyPdf(bytes, expectedPages: expected, password: password);
+    // Encrypted output is already written as one revision.
+    if (password == null) bytes = _singleRevision(bytes, expected);
     final path = await outPath(name);
-    await File(path).writeAsBytes(bytes, flush: true);
+    await writeAtomic(path, bytes);
     return path;
+  }
+
+  /// Rewrites [bytes] as one clean revision. A normal save appends to the
+  /// source, keeping it as an earlier revision inside the output — cutting
+  /// the file at its first %%EOF then recovers the un-watermarked, unstamped
+  /// or unfilled original. Done as reload + full save because a full save
+  /// straight after flattening form fields corrupts the page tree; falls
+  /// back to [bytes] if the rewrite doesn't verify.
+  static List<int> _singleRevision(List<int> bytes, int expectedPages) {
+    try {
+      final d = PdfDocument(inputBytes: bytes);
+      d.fileStructure.incrementalUpdate = false;
+      final out = d.saveSync();
+      d.dispose();
+      verifyPdf(out, expectedPages: expectedPages);
+      return out;
+    } catch (_) {
+      return bytes;
+    }
+  }
+
+  /// Throws [UserFacingError] unless [bytes] open as a PDF with
+  /// [expectedPages] pages (when given) and at least one page.
+  static void verifyPdf(List<int> bytes,
+      {int? expectedPages, String? password}) {
+    final PdfDocument check;
+    try {
+      check = PdfDocument(inputBytes: bytes, password: password);
+    } catch (_) {
+      throw const UserFacingError(
+          'The result could not be re-opened, so it was not saved. Try again or use another copy of the file.');
+    }
+    final n = check.pages.count;
+    check.dispose();
+    if (n == 0 || (expectedPages != null && n != expectedPages)) {
+      throw const UserFacingError(
+          'The result failed its page check, so it was not saved.');
+    }
   }
 
   /// Adds a page with its own size and rotation. Syncfusion applies page
@@ -75,8 +123,16 @@ class PdfService {
   }
 
   Future<List<String>> split(Uint8List input, int from, int to) async {
+    if (from > to) {
+      throw UserFacingError('"From" page ($from) is after "To" page ($to).');
+    }
     final src = PdfDocument(inputBytes: input);
     final last = src.pages.count;
+    if (from > last) {
+      src.dispose();
+      throw UserFacingError(
+          'This PDF has only $last ${last == 1 ? 'page' : 'pages'}.');
+    }
     final start = from.clamp(1, last);
     final end = to.clamp(start, last);
     final out = PdfDocument();
@@ -96,15 +152,52 @@ class PdfService {
   /// Runs on a background isolate — the Syncfusion parse/save and JPEG
   /// re-encode are seconds of pure CPU that would otherwise freeze the
   /// progress UI (hang → jump to 100%).
-  Future<List<String>> compress(Uint8List input) =>
-      _offUi(() => _compressImpl(input));
+  Future<List<String>> compress(Uint8List input) async {
+    final r = await _offUi(() => _compressImpl(input));
+    final path = r.first, mode = r.last;
+    _checkSameLength(input, path);
+    final before = input.length, after = File(path).lengthSync();
+    final saved = before == 0 ? 0 : ((before - after) / before * 100).round();
+    ToolNotes.add(saved > 0
+        ? 'Reduced from ${_fmt(before)} to ${_fmt(after)} ($saved% smaller).'
+        : 'This PDF was already well compressed — the result is about the same size (${_fmt(after)}).');
+    if (mode == 'raster') {
+      ToolNotes.add(
+          'To shrink it, pages were re-encoded as images: text in the result can no longer be selected or searched.');
+    }
+    return [path];
+  }
+
+  /// Every compression result must keep all pages of the source.
+  static void _checkSameLength(Uint8List input, String outPath) {
+    final src = PdfDocument(inputBytes: input);
+    final n = src.pages.count;
+    src.dispose();
+    try {
+      verifyPdf(File(outPath).readAsBytesSync(), expectedPages: n);
+    } catch (_) {
+      try {
+        File(outPath).deleteSync();
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  static String _fmt(int bytes) => bytes >= 1024 * 1024
+      ? '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB'
+      : '${(bytes / 1024).round()} KB';
+
+  /// Tests set this: flutter_tester provides a root isolate token but can't
+  /// host background-isolate platform channels.
+  @visibleForTesting
+  static bool runInline = false;
 
   /// Runs heavy conversion work on a background isolate so the UI isolate
   /// keeps pumping frames. Platform channels (pdfx raster, path_provider)
   /// are re-attached inside the isolate via the root token.
   static Future<List<String>> _offUi(Future<List<String>> Function() work) {
     final token = RootIsolateToken.instance;
-    if (token == null) return work(); // unit tests / no engine
+    if (token == null || runInline) return work();
     return Isolate.run(() {
       BackgroundIsolateBinaryMessenger.ensureInitialized(token);
       return work();
@@ -128,7 +221,19 @@ class PdfService {
     final doc = PdfDocument(inputBytes: input);
     doc.security.algorithm = PdfEncryptionAlgorithm.aesx256Bit;
     doc.security.userPassword = password;
-    return [await _save(doc, 'protected')];
+    final path = await _save(doc, 'protected', password: password);
+    // The output must NOT open without the password.
+    var opensWithout = false;
+    try {
+      PdfDocument(inputBytes: File(path).readAsBytesSync()).dispose();
+      opensWithout = true;
+    } catch (_) {}
+    if (opensWithout) {
+      File(path).deleteSync();
+      throw const UserFacingError(
+          'Protection could not be verified, so the file was not saved.');
+    }
+    return [path];
   }
 
   void _addFormattedPage(PdfDocument doc, Uint8List imageBytes,
@@ -213,8 +318,21 @@ class PdfService {
   /// quality/scale down until the total fits. Output is image-based (like a
   /// scan) — the honest trade for guaranteed size, stated in the UI.
   /// Runs on a background isolate (see [compress]).
-  Future<List<String>> compressToTarget(Uint8List input, int targetBytes) =>
-      _offUi(() => _compressToTargetImpl(input, targetBytes));
+  Future<List<String>> compressToTarget(
+      Uint8List input, int targetBytes) async {
+    final r = await _offUi(() => _compressToTargetImpl(input, targetBytes));
+    final path = r.first, mode = r.last;
+    _checkSameLength(input, path);
+    final size = File(path).lengthSync();
+    // Report the measured size — never claim the target without checking.
+    ToolNotes.add(size <= targetBytes
+        ? 'Result is ${_fmt(size)} — under your ${_fmt(targetBytes)} target.'
+        : 'Could not get under ${_fmt(targetBytes)}: the smallest readable result is ${_fmt(size)}.');
+    ToolNotes.add(mode == 'raster'
+        ? 'To reach the size, pages were re-encoded as images: text in the result can no longer be selected or searched.'
+        : 'Text is kept sharp and selectable.');
+    return [path];
+  }
 
   Future<List<String>> imagesToPdfNamed(
       List<Uint8List> images, String name) async {
@@ -266,8 +384,17 @@ class PdfService {
   }
 
   /// PDF → PNG per page (returns many files).
-  Future<List<String>> pdfToImages(Uint8List input) =>
-      RasterService.instance.renderToFiles(input, scale: 2.0);
+  /// [sourceName] names the images after their PDF (`Report_page_1.jpg`) so
+  /// pages saved to Downloads from different files can be told apart.
+  Future<List<String>> pdfToImages(Uint8List input, {String? sourceName}) {
+    final base = sourceName
+        ?.replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '')
+        .replaceAll(RegExp(r'[^\w\-. ]+'), '_')
+        .trim();
+    return RasterService.instance.renderToFiles(input,
+        scale: 2.0,
+        prefix: base == null || base.isEmpty ? 'page' : '${base}_page');
+  }
 
   /// PDF → plain text. Uses each page's text layer, and on-device OCR only
   /// for pages without one (scanned pages).
@@ -287,7 +414,7 @@ class PdfService {
           'Some pages were scanned images and were read with on-device OCR — check names and numbers.');
     }
     final path = await outPath('extracted', ext: 'txt');
-    await File(path).writeAsString(text, flush: true);
+    await writeAtomic(path, utf8.encode(text));
     return [path];
   }
 
@@ -316,8 +443,9 @@ class PdfService {
     final doc = PdfDocument(inputBytes: input);
     final font =
         PdfStandardFont(PdfFontFamily.helvetica, 26, style: PdfFontStyle.bold);
-    final pdfColor = PdfColor((color.value >> 16) & 0xFF,
-        (color.value >> 8) & 0xFF, color.value & 0xFF);
+    final argb = color.toARGB32();
+    final pdfColor =
+        PdfColor((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF);
     final brush = PdfSolidBrush(pdfColor);
     final pen = PdfPen(pdfColor, width: 2);
     for (var i = 0; i < doc.pages.count; i++) {
@@ -361,8 +489,10 @@ class PdfService {
     final fields = <(int, String, String)>[];
     for (var i = 0; i < doc.form.fields.count; i++) {
       final f = doc.form.fields[i];
-      if (f is PdfTextBoxField)
-        fields.add((i, f.name ?? 'Field ${i + 1}', f.text));
+      if (f is PdfTextBoxField) {
+        fields.add(
+            (i, fieldLabel(f.name, f.tooltip) ?? 'Field ${i + 1}', f.text));
+      }
     }
     doc.dispose();
     return fields;
@@ -407,8 +537,8 @@ Future<List<String>> _compressImpl(Uint8List input) async {
   // If stream compression reduced by ≥ 20 %, it's good enough.
   if (reduction >= 0.20) {
     final path = await pdf.outPath('compressed');
-    await File(path).writeAsBytes(compressed1, flush: true);
-    return [path];
+    await writeAtomic(path, compressed1);
+    return [path, 'lossless'];
   }
 
   // --- Pass 2: raster-JPEG (lossy, works on image-based / scanned PDFs) ---
@@ -416,31 +546,48 @@ Future<List<String>> _compressImpl(Uint8List input) async {
   final jpegs = <Uint8List>[];
   for (final png in pages) {
     final decoded = img.decodePng(png);
-    if (decoded == null) continue;
+    if (decoded == null) break; // a page failed: never drop pages silently
     jpegs.add(Uint8List.fromList(img.encodeJpg(decoded, quality: 82)));
   }
 
-  if (jpegs.isEmpty) {
-    // Fallback: return the stream-compressed version even if gain was small.
+  if (jpegs.isEmpty || jpegs.length != pages.length) {
+    // Fallback: the lossless version, even if the gain was small.
     final path = await pdf.outPath('compressed');
-    await File(path).writeAsBytes(compressed1, flush: true);
-    return [path];
+    await writeAtomic(path, compressed1);
+    return [path, 'lossless'];
   }
 
   final rasterResult = await pdf.imagesToPdfNamed(jpegs, 'compressed');
   final pass2Size = File(rasterResult.first).lengthSync();
 
-  // Return whichever is smaller.
-  if (pass2Size < pass1Size) return rasterResult;
+  // Return whichever is smaller — and remove the other attempt's file.
+  if (pass2Size < pass1Size) return [rasterResult.first, 'raster'];
+  File(rasterResult.first).deleteSync();
 
   final path = await pdf.outPath('compressed');
-  await File(path).writeAsBytes(compressed1, flush: true);
-  return [path];
+  await writeAtomic(path, compressed1);
+  return [path, 'lossless'];
 }
 
 Future<List<String>> _compressToTargetImpl(
     Uint8List input, int targetBytes) async {
   final pdf = PdfService.instance;
+  final name = 'fit_${targetBytes ~/ 1024}kb';
+  // Lossless first: if that already fits, keep the text sharp and
+  // selectable. Rasterising a small text PDF made it many times *bigger*.
+  final doc = PdfDocument(inputBytes: input);
+  doc.compressionLevel = PdfCompressionLevel.best;
+  doc.fileStructure.incrementalUpdate = false;
+  var lossless =
+      Uint8List.fromList(doc.saveSync()); // already off the UI isolate
+  doc.dispose();
+  if (input.length < lossless.length) lossless = input;
+  if (lossless.length <= targetBytes) {
+    final path = await pdf.outPath(name);
+    await writeAtomic(path, lossless);
+    return [path, 'lossless'];
+  }
+
   const attempts = [
     (scale: 2.0, quality: 80),
     (scale: 1.6, quality: 70),
@@ -455,7 +602,9 @@ Future<List<String>> _compressToTargetImpl(
     var total = 0;
     for (final png in pages) {
       final decoded = img.decodePng(png);
-      if (decoded == null) continue;
+      if (decoded == null) {
+        throw const UserFacingError('A page could not be rendered.');
+      }
       final jpg =
           Uint8List.fromList(img.encodeJpg(decoded, quality: a.quality));
       jpegs.add(jpg);
@@ -463,15 +612,48 @@ Future<List<String>> _compressToTargetImpl(
     }
     if (total <= targetBytes * 0.92) {
       // ~8% headroom for PDF structure
-      return pdf.imagesToPdfNamed(jpegs, 'fit_${targetBytes ~/ 1024}kb');
+      return [(await pdf.imagesToPdfNamed(jpegs, name)).first, 'raster'];
     }
   }
-  // Could not reach target — return best effort at lowest setting.
+  // Could not reach target — return the smallest result we can make.
   final pages = await RasterService.instance.renderAll(input, scale: 0.7);
-  final jpegs = [
-    for (final png in pages)
-      if (img.decodePng(png) case final d?)
-        Uint8List.fromList(img.encodeJpg(d, quality: 25))
-  ];
-  return pdf.imagesToPdfNamed(jpegs, 'fit_best_effort');
+  final jpegs = <Uint8List>[];
+  for (final png in pages) {
+    final d = img.decodePng(png);
+    if (d == null) throw const UserFacingError('A page could not be rendered.');
+    jpegs.add(Uint8List.fromList(img.encodeJpg(d, quality: 25)));
+  }
+  final raster = (await pdf.imagesToPdfNamed(jpegs, 'fit_best_effort')).first;
+  if (File(raster).lengthSync() < lossless.length) return [raster, 'raster'];
+  File(raster).deleteSync();
+  final path = await pdf.outPath('fit_best_effort');
+  await writeAtomic(path, lossless);
+  return [path, 'lossless'];
+}
+
+/// A readable label for a form field: the form's own tooltip if it has one,
+/// else the internal name made human — `form1[0].page1[0].full_name[0]`
+/// → "Full name", `dob` → "Date of birth".
+String? fieldLabel(String? name, [String? tooltip]) {
+  final tip = tooltip?.trim();
+  if (tip != null && tip.isNotEmpty) return tip;
+  if (name == null || name.trim().isEmpty) return null;
+  final last = name.split('.').last.replaceAll(RegExp(r'\[\d+\]'), '');
+  final words = last
+      .replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}')
+      .replaceAll(RegExp(r'[_\-]+'), ' ')
+      .trim()
+      .toLowerCase();
+  if (words.isEmpty) return null;
+  const known = {
+    'dob': 'Date of birth',
+    'pin': 'PIN code',
+    'pincode': 'PIN code',
+    'addr': 'Address',
+    'tel': 'Phone',
+    'mob': 'Mobile',
+    'email': 'Email',
+    'pan': 'PAN',
+  };
+  return known[words] ?? '${words[0].toUpperCase()}${words.substring(1)}';
 }

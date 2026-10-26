@@ -58,7 +58,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final top = MediaQuery.paddingOf(context).top;
     const headerHeight = 286.0;
-    final artHeight = top + headerHeight + _SearchHeader.extent;
+    // The pinned search bar grows with the system text size.
+    final searchExtent =
+        _SearchHeader.extentFor(MediaQuery.textScalerOf(context));
+    final artHeight = top + headerHeight + searchExtent;
 
     return Stack(children: [
       // Artwork lives behind the scroll view: it drifts up at half speed
@@ -94,6 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
               SliverPersistentHeader(
                 pinned: true,
                 delegate: _SearchHeader(
+                  extent: searchExtent,
                   canvas: c.canvas,
                   border: c.border,
                   child: NovaField(
@@ -189,8 +193,15 @@ class _Header extends StatelessWidget {
               Row(children: [
                 const NovaMark(size: 28),
                 const SizedBox(width: 10),
-                Text('PDF Nova', style: t.titleMedium),
-                const Spacer(),
+                // Flexible + ellipsis: with very large system text the
+                // wordmark and chip share the row instead of overflowing.
+                Expanded(
+                  child: Text('PDF Nova',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.titleMedium),
+                ),
+                const SizedBox(width: 8),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -204,6 +215,8 @@ class _Header extends StatelessWidget {
                         size: 14, color: c.success),
                     const SizedBox(width: 5),
                     Text('On-device',
+                        textScaler: MediaQuery.textScalerOf(context)
+                            .clamp(maxScaleFactor: 1.3),
                         style: t.labelMedium
                             ?.copyWith(color: c.ink, fontSize: 12)),
                   ]),
@@ -236,6 +249,7 @@ class _Header extends StatelessWidget {
 /// it once content scrolls beneath.
 class _SearchHeader extends SliverPersistentHeaderDelegate {
   _SearchHeader({
+    required this.extent,
     required this.child,
     required this.canvas,
     required this.border,
@@ -245,7 +259,11 @@ class _SearchHeader extends SliverPersistentHeaderDelegate {
   final Color canvas;
   final Color border;
 
-  static const extent = 80.0;
+  final double extent;
+
+  /// 80 at normal size; taller for larger system text so the field fits.
+  static double extentFor(TextScaler s) =>
+      (80 + (s.scale(15.5) - 15.5) * 1.4).clamp(80.0, 140.0);
 
   @override
   double get minExtent => extent;

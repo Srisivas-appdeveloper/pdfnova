@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'document_index.dart';
 
 /// Hive-backed local storage. Two boxes:
 ///  - settings: counters used for ad frequency capping, appearance prefs
@@ -27,6 +28,8 @@ class StorageService {
       orElse: () => ThemeMode.system,
     );
     reduceMotion.value = _settings.get('reduceMotion', defaultValue: false);
+    contentIndexing.value =
+        _settings.get('contentIndexing', defaultValue: false);
     await _upgradeRecents();
   }
 
@@ -34,6 +37,30 @@ class StorageService {
   /// Listened to by the app root; changing it re-themes the whole app.
   final themeMode = ValueNotifier<ThemeMode>(ThemeMode.system);
   final reduceMotion = ValueNotifier<bool>(false);
+
+  /// Opt-in local content search (see DocumentIndex). Off by default.
+  final contentIndexing = ValueNotifier<bool>(false);
+
+  /// Turning it off deletes all indexed text; turning it on indexes the
+  /// current output history. Returns how many documents were indexed.
+  Future<int> setContentIndexing(bool on) async {
+    contentIndexing.value = on;
+    await _settings.put('contentIndexing', on);
+    if (!on) {
+      await DocumentIndex.instance.clear();
+      return 0;
+    }
+    return (await DocumentIndex.instance.sync(history.map((r) => r.path)))
+        .indexed;
+  }
+
+  /// Index side-effects never break the history operation itself.
+  Future<void> _index(Future<void> Function(DocumentIndex i) f) async {
+    if (!contentIndexing.value) return;
+    try {
+      await f(DocumentIndex.instance);
+    } catch (_) {}
+  }
 
   Future<void> setThemeMode(ThemeMode mode) {
     themeMode.value = mode;
@@ -103,23 +130,46 @@ class StorageService {
             .withMeasuredSize()
     ];
     await _save([...fresh, ...history.where((r) => !paths.contains(r.path))]);
+    await _index((i) async {
+      for (final p in paths) {
+        await i.indexFile(p);
+      }
+    });
   }
 
   Future<void> addRecent(String path, String tool) => addOutputs([path], tool);
 
   Future<void> removeRecent(String path) => removeRecents({path});
 
-  Future<void> removeRecents(Set<String> paths) =>
-      _save(history.where((r) => !paths.contains(r.path)).toList());
+  /// Removing history also removes that file's indexed text.
+  Future<void> removeRecents(Set<String> paths) async {
+    await _save(history.where((r) => !paths.contains(r.path)).toList());
+    await _index((i) async {
+      for (final p in paths) {
+        await i.remove(p);
+      }
+    });
+  }
 
-  Future<void> renameRecent(String from, String to) => _save(
-      [for (final r in history) r.path == from ? r.copyWith(path: to) : r]);
+  Future<void> renameRecent(String from, String to) async {
+    await _save(
+        [for (final r in history) r.path == from ? r.copyWith(path: to) : r]);
+    await _index((i) async {
+      await i.remove(from);
+      await i.indexFile(to);
+    });
+  }
 
   /// Drops history rows whose file no longer exists. Returns how many.
   Future<int> pruneMissing() async {
     final all = history;
     final kept = all.where((r) => File(r.path).existsSync()).toList();
     await _save(kept);
+    await _index((i) async {
+      for (final r in all.where((r) => !kept.contains(r))) {
+        await i.remove(r.path);
+      }
+    });
     return all.length - kept.length;
   }
 }

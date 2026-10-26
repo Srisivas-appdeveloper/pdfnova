@@ -34,7 +34,7 @@ class SignatureScreen extends StatelessWidget {
           listener: (context, state) {
             if (state is ToolFailure) {
               ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text(state.message)));
+                  .showSnackBar(toolSnack(context, state.message));
             }
           },
           builder: (context, state) => ToolStages(
@@ -69,6 +69,11 @@ class _SignFlowState extends State<_SignFlow> {
   int _page = 1;
   // Signature centre as fraction of preview, and width fraction.
   double _relX = 0.7, _relY = 0.8, _relW = 0.34;
+  // Height / width of the signature image — the preview must centre it
+  // exactly as placeSignature does, or the saved position drifts.
+  double _sigAspect = 0.5;
+  // Width / height of the previewed page (landscape and Letter pages too).
+  double _pageAspect = 210 / 297;
 
   @override
   void dispose() {
@@ -87,9 +92,21 @@ class _SignFlowState extends State<_SignFlow> {
   Future<void> _loadPage(int page) async {
     final preview =
         await RasterService.instance.renderPage(_pdf!, page, scale: 1.5);
+    if (preview == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Could not show this page — the PDF may be locked or damaged.')));
+      return;
+    }
+    final image = await decodeImageFromList(preview);
+    final aspect = image.width / image.height;
+    image.dispose();
+    if (!mounted) return;
     setState(() {
       _page = page;
       _pagePreview = preview;
+      _pageAspect = aspect;
     });
   }
 
@@ -102,7 +119,13 @@ class _SignFlowState extends State<_SignFlow> {
     }
     final png = await _controller.toPngBytes();
     if (png != null) {
-      setState(() => _signature = png);
+      final image = await decodeImageFromList(png);
+      final aspect = image.height / image.width;
+      image.dispose();
+      setState(() {
+        _signature = png;
+        _sigAspect = aspect;
+      });
     }
   }
 
@@ -245,13 +268,16 @@ class _SignFlowState extends State<_SignFlow> {
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
           child: Center(
             child: AspectRatio(
-              aspectRatio: 210 / 297, // preview letterboxed to A4-ish
+              aspectRatio: _pageAspect, // the page's own shape, never stretched
               child: LayoutBuilder(builder: (context, page) {
                 final w = page.maxWidth;
                 final h = page.maxHeight;
                 final sigW = w * _relW;
                 return Container(
                   decoration: BoxDecoration(
+                    // Paper is white in both themes; the render is
+                    // transparent, so without this the shadow tinted it grey.
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: c.border),
                     boxShadow: [
@@ -268,19 +294,22 @@ class _SignFlowState extends State<_SignFlow> {
                           child: Image.memory(_pagePreview!, fit: BoxFit.fill)),
                       Positioned(
                         left: _relX * w - sigW / 2,
-                        top: _relY * h - sigW * 0.35,
+                        top: _relY * h - sigW * _sigAspect / 2,
                         child: GestureDetector(
                           onPanUpdate: (d) => setState(() {
                             _relX = (_relX + d.delta.dx / w).clamp(0.05, 0.95);
                             _relY = (_relY + d.delta.dy / h).clamp(0.05, 0.95);
                           }),
                           child: Container(
-                            decoration: BoxDecoration(
+                            color: c.accent.withValues(alpha: 0.06),
+                            // Border drawn over the image, not around it, so
+                            // it doesn't offset the signature from its spot.
+                            foregroundDecoration: BoxDecoration(
                               border: Border.all(color: c.accent, width: 1.5),
                               borderRadius: BorderRadius.circular(6),
-                              color: c.accent.withValues(alpha: 0.06),
                             ),
-                            child: Image.memory(_signature!, width: sigW),
+                            child: Image.memory(_signature!,
+                                width: sigW, height: sigW * _sigAspect),
                           ),
                         ),
                       ),

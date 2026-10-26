@@ -32,7 +32,7 @@ class OrganizeScreen extends StatelessWidget {
           listener: (context, state) {
             if (state is ToolFailure) {
               ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text(state.message)));
+                  .showSnackBar(toolSnack(context, state.message));
             }
           },
           builder: (context, state) => ToolStages(
@@ -63,6 +63,25 @@ class _Editor extends StatefulWidget {
 
 class _EditorState extends State<_Editor> {
   Uint8List? _pdf;
+
+  /// Pages playing their delete animation (by source index).
+  final _removing = <int>{};
+
+  void _delete(_PageItem p) {
+    if (NovaMotion.reduced(context)) {
+      setState(() => _pages!.remove(p));
+      return;
+    }
+    setState(() => _removing.add(p.sourceIndex));
+    Future.delayed(NovaMotion.medium, () {
+      if (!mounted) return;
+      setState(() {
+        _pages!.remove(p);
+        _removing.remove(p.sourceIndex);
+      });
+    });
+  }
+
   List<_PageItem>? _pages;
   bool _loading = false;
 
@@ -91,7 +110,11 @@ class _EditorState extends State<_Editor> {
   }
 
   void _apply() {
-    final pages = _pages!;
+    // Pages mid-delete-animation are already deleted.
+    final pages = [
+      for (final p in _pages!)
+        if (!_removing.contains(p.sourceIndex)) p
+    ];
     context.read<ToolBloc>().add(ToolStarted(
           widget.tool,
           () => PdfService.instance.organize(
@@ -129,7 +152,9 @@ class _EditorState extends State<_Editor> {
       Padding(
         padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
         child: Row(children: [
-          Text('${_pages!.length} pages', style: t.headlineMedium),
+          Text(
+              '${_pages!.length - _removing.length} ${_pages!.length - _removing.length == 1 ? 'page' : 'pages'}',
+              style: t.headlineMedium),
           const Spacer(),
           Text('Hold & drag to reorder', style: t.bodySmall),
         ]).enter(context),
@@ -151,72 +176,89 @@ class _EditorState extends State<_Editor> {
               ),
             ),
           ),
-          onReorder: (from, to) => setState(() {
-            if (to > from) to--;
+          // onReorderItem already adjusts `to` for the removed item.
+          onReorderItem: (from, to) => setState(() {
             final item = _pages!.removeAt(from);
             _pages!.insert(to, item);
           }),
           itemBuilder: (context, i) {
             final p = _pages![i];
-            return Padding(
+            final leaving = _removing.contains(p.sourceIndex);
+            // Deleted rows fade and fold away instead of vanishing.
+            return ClipRect(
               key: ValueKey(p.sourceIndex),
-              padding: const EdgeInsets.only(bottom: 10),
-              child: NovaCard(
-                radius: 18,
-                padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
-                child: Row(children: [
-                  Container(
-                    width: 64,
-                    height: 76,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: c.surfaceAlt,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: AnimatedRotation(
-                      turns: p.quarterTurns / 4,
-                      duration: NovaMotion.medium,
-                      curve: NovaMotion.emphasized,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: Image.memory(p.thumb,
-                            width: 50, height: 66, fit: BoxFit.contain),
-                      ),
-                    ),
+              child: AnimatedAlign(
+                duration: NovaMotion.medium,
+                curve: NovaMotion.emphasized,
+                alignment: Alignment.topCenter,
+                heightFactor: leaving ? 0 : 1,
+                child: AnimatedOpacity(
+                  duration: NovaMotion.quick,
+                  opacity: leaving ? 0 : 1,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: NovaCard(
+                      radius: 18,
+                      padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
+                      child: Row(children: [
+                        Container(
+                          width: 64,
+                          height: 76,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: c.surfaceAlt,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: AnimatedRotation(
+                            turns: p.quarterTurns / 4,
+                            duration: NovaMotion.medium,
+                            curve: NovaMotion.emphasized,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: Image.memory(p.thumb,
+                                  width: 50, height: 66, fit: BoxFit.contain),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Page ${p.sourceIndex + 1}',
+                                  style: t.titleSmall),
+                              if (p.quarterTurns % 4 != 0)
+                                Text('Rotated ${(p.quarterTurns % 4) * 90}°',
+                                    style:
+                                        t.bodySmall?.copyWith(color: c.accent)),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Rotate',
+                          icon: Icon(Icons.rotate_90_degrees_cw_outlined,
+                              color: c.inkMid, size: 22),
+                          onPressed: () => setState(() => p.quarterTurns++),
+                        ),
+                        IconButton(
+                          tooltip: 'Delete page',
+                          icon: Icon(Icons.delete_outline_rounded,
+                              color: c.danger, size: 22),
+                          onPressed: leaving ? null : () => _delete(p),
+                        ),
+                        ReorderableDragStartListener(
+                          index: i,
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Icon(Icons.drag_indicator_rounded,
+                                color: c.inkLow),
+                          ),
+                        ),
+                      ]),
+                    ).enter(context, index: i),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Page ${p.sourceIndex + 1}', style: t.titleSmall),
-                        if (p.quarterTurns % 4 != 0)
-                          Text('Rotated ${(p.quarterTurns % 4) * 90}°',
-                              style: t.bodySmall?.copyWith(color: c.accent)),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Rotate',
-                    icon: Icon(Icons.rotate_90_degrees_cw_outlined,
-                        color: c.inkMid, size: 22),
-                    onPressed: () => setState(() => p.quarterTurns++),
-                  ),
-                  IconButton(
-                    tooltip: 'Delete page',
-                    icon: Icon(Icons.delete_outline_rounded,
-                        color: c.danger, size: 22),
-                    onPressed: () => setState(() => _pages!.removeAt(i)),
-                  ),
-                  ReorderableDragStartListener(
-                    index: i,
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Icon(Icons.drag_indicator_rounded, color: c.inkLow),
-                    ),
-                  ),
-                ]),
-              ).enter(context, index: i),
+                ),
+              ),
             );
           },
         ),

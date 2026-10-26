@@ -39,6 +39,21 @@ class SuccessView extends StatelessWidget {
     }
   }
 
+  Future<void> _saveAll(BuildContext context) async {
+    var saved = 0;
+    for (final p in paths) {
+      try {
+        final where = await FileService.instance.saveToDownloads(p);
+        if (where.startsWith('Download/')) saved++;
+      } catch (_) {}
+    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(saved == paths.length
+            ? 'Saved all ${paths.length} files to Download/PDFNova.'
+            : 'Saved $saved of ${paths.length} files to Download/PDFNova. Use Share for the rest.')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.nova;
@@ -113,9 +128,10 @@ class SuccessView extends StatelessWidget {
             Row(children: [
               Expanded(
                 child: NovaButton.secondary(
-                  label: 'Save',
+                  label: many ? 'Save all' : 'Save',
                   icon: Icons.download_rounded,
-                  onPressed: () => _withAd(() => _save(context, paths.first)),
+                  onPressed: () => _withAd(() =>
+                      many ? _saveAll(context) : _save(context, paths.first)),
                 ),
               ),
               const SizedBox(width: 10),

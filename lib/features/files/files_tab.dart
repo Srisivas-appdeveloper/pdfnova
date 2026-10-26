@@ -4,15 +4,19 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_motion.dart';
 import '../../core/widgets/nova_button.dart';
 import '../../core/widgets/nova_card.dart';
+import '../../core/widgets/nova_open_container.dart';
 import '../../core/widgets/nova_controls.dart';
 import '../../core/widgets/nova_dialog.dart';
 import '../../core/widgets/nova_entrance.dart';
 import '../../core/widgets/nova_mark.dart';
+import '../../core/theme/app_theme.dart';
+import '../../services/document_index.dart';
 import '../../services/file_service.dart';
 import '../../services/storage_service.dart';
 import '../home/tools.dart';
 import 'file_row.dart';
 import 'folder_screen.dart';
+import '../viewer/viewer_screen.dart';
 
 /// A group of recent outputs made by the same tool.
 class FileFolder {
@@ -164,6 +168,10 @@ class _FilesTabState extends State<FilesTab> {
     final shown =
         filterRecords(all, query: _query.text, kind: _kind, sort: _sort);
     final selecting = _selected.isNotEmpty;
+    // Content search only when the user opted in, kept visibly separate
+    // from name matches.
+    final contentSearch = StorageService.instance.contentIndexing.value &&
+        _query.text.trim().length >= 2;
 
     return PopScope(
       canPop: !selecting,
@@ -303,7 +311,23 @@ class _FilesTabState extends State<FilesTab> {
                           : Column(
                               key: const ValueKey('list'),
                               children: [
-                                if (shown.isEmpty)
+                                if (contentSearch)
+                                  const Padding(
+                                    padding: EdgeInsets.only(bottom: 10),
+                                    child: NovaEyebrow('File names'),
+                                  ),
+                                // With content search the "Inside files"
+                                // results follow, so a one-line note is
+                                // enough — a full empty state pushed them
+                                // off screen.
+                                if (shown.isEmpty && contentSearch)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 14),
+                                    child: Text('No file names match',
+                                        style: t.bodyMedium
+                                            ?.copyWith(color: c.inkMid)),
+                                  )
+                                else if (shown.isEmpty)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 32),
                                     child: Column(children: [
@@ -328,6 +352,10 @@ class _FilesTabState extends State<FilesTab> {
                                       onSelect: () => _toggle(r.path),
                                     ).enter(context, index: i),
                                   ),
+                                if (contentSearch)
+                                  _ContentHits(
+                                      key: ValueKey(_query.text.trim()),
+                                      query: _query.text.trim()),
                               ],
                             ),
                     ),
@@ -457,22 +485,9 @@ class _FolderGrid extends StatelessWidget {
         final icon = f.tool?.icon ?? Icons.folder_outlined;
         final latest = timeAgo(f.items.first.time);
         return Pressable(
-          child: OpenContainer(
-            transitionType: ContainerTransitionType.fadeThrough,
-            transitionDuration: NovaMotion.reduced(context)
-                ? NovaMotion.quick
-                : NovaMotion.container,
-            closedElevation: 0,
-            openElevation: 0,
-            closedColor: c.surface,
-            openColor: c.canvas,
-            middleColor: c.canvas,
-            closedShape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
-              side: BorderSide(color: c.border),
-            ),
-            onClosed: (_) => onChanged(),
-            openBuilder: (_, __) =>
+          child: NovaOpenContainer(
+            onClosed: onChanged,
+            openBuilder: (_) =>
                 FolderScreen(title: f.title, icon: icon, fg: fg, bg: bg),
             closedBuilder: (context, open) => InkWell(
               onTap: open,
@@ -481,19 +496,17 @@ class _FolderGrid extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(children: [
-                      NovaIconTile(icon: icon, fg: fg, bg: bg, size: 40),
-                      const Spacer(),
-                      Text('${f.items.length}',
-                          style: t.headlineSmall?.copyWith(color: c.inkMid)),
-                    ]),
+                    NovaIconTile(icon: icon, fg: fg, bg: bg, size: 40),
                     const Spacer(),
                     Text(f.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: t.titleMedium),
                     const SizedBox(height: 2),
-                    Text('Latest $latest',
+                    // Count lives here, not beside the icon: there it had no
+                    // room at large text sizes (and a lone "1" read as a bar).
+                    Text(
+                        '${f.items.length} ${f.items.length == 1 ? 'file' : 'files'} · $latest',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: t.bodySmall),
@@ -549,6 +562,93 @@ class _Empty extends StatelessWidget {
           ),
         ],
       ).enter(context),
+    );
+  }
+}
+
+/// "Inside files" results: page-numbered snippets from the local index.
+class _ContentHits extends StatelessWidget {
+  const _ContentHits({super.key, required this.query});
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.nova;
+    final t = Theme.of(context).textTheme;
+    return FutureBuilder<List<SearchHit>>(
+      future: DocumentIndex.instance.search(query),
+      builder: (context, snap) {
+        final hits = snap.data;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 18, bottom: 10),
+              child: NovaEyebrow('Inside files'),
+            ),
+            if (hits == null)
+              const LinearProgressIndicator(minHeight: 2)
+            else if (hits.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                    'No indexed PDF contains "$query". Scanned pages are not searchable.',
+                    style: t.bodyMedium),
+              )
+            else
+              for (final h in hits)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: NovaCard(
+                    radius: 18,
+                    padding: const EdgeInsets.all(14),
+                    onTap: () => Navigator.of(context).push(NovaRoute(
+                        page: ViewerScreen(
+                            tool: allTools
+                                .firstWhere((t) => t.id == ToolId.viewer),
+                            initialPath: h.path,
+                            initialPage: h.page))),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Expanded(
+                            child: Text(h.path.split('/').last,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: t.titleSmall),
+                          ),
+                          const SizedBox(width: 8),
+                          Text('Page ${h.page}',
+                              style: t.labelMedium?.copyWith(color: c.accent)),
+                        ]),
+                        const SizedBox(height: 6),
+                        Text.rich(
+                          TextSpan(style: t.bodyMedium, children: [
+                            TextSpan(
+                                text: h.snippet.substring(0, h.matchStart)),
+                            TextSpan(
+                              text: h.snippet.substring(
+                                  h.matchStart, h.matchStart + h.matchLength),
+                              style: TextStyle(
+                                  color: c.ink,
+                                  fontWeight: FontWeight.w600,
+                                  backgroundColor: c.accentSoft),
+                            ),
+                            TextSpan(
+                                text: h.snippet
+                                    .substring(h.matchStart + h.matchLength)),
+                          ]),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+          ],
+        );
+      },
     );
   }
 }

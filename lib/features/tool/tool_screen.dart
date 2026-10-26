@@ -1,7 +1,9 @@
+import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:animations/animations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_motion.dart';
 import '../../core/widgets/nova_button.dart';
@@ -18,6 +20,7 @@ import '../home/tools.dart';
 import 'processing_view.dart';
 import 'success_view.dart';
 import 'tool_bloc.dart';
+import 'tool_stages.dart';
 import 'pick_zone.dart';
 import 'tool_header.dart';
 
@@ -52,7 +55,7 @@ class ToolScreen extends StatelessWidget {
             }
             if (state is ToolFailure) {
               ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text(state.message)));
+                  .showSnackBar(toolSnack(context, state.message));
             }
           },
           // Only rebuild the switcher when the stage changes; progress ticks
@@ -74,7 +77,10 @@ class ToolScreen extends StatelessWidget {
                 ToolProcessing() => BlocBuilder<ToolBloc, ToolState>(
                     key: const ValueKey('processing'),
                     builder: (context, s) => ProcessingView(
-                        progress: s is ToolProcessing ? s.progress : 1,
+                        progress: s is ToolProcessing ? s.progress : null,
+                        stage: s is ToolProcessing
+                            ? s.stage
+                            : null, // keep the outgoing ring unchanged while it fades
                         label: _processingLabel(tool.id)),
                   ),
                 ToolSuccess s => SuccessView(
@@ -130,6 +136,10 @@ class _InputViewState extends State<_InputView> {
   final _textCtrl = TextEditingController(); // watermark / stamp text
   bool _aadhaarMode = true;
   int _targetKb = 500;
+
+  /// Page count of the picked PDF (Split), read off the UI thread;
+  /// -1 = password-protected, null = not known yet.
+  int? _pageCount;
   Color _stampColor = _stampColors.first;
   PdfToWordMode _wordMode = PdfToWordMode.editable;
 
@@ -175,9 +185,23 @@ class _InputViewState extends State<_InputView> {
             ..clear()
             ..add(picked.first);
         }
+        _pageCount = null;
       });
+      if (widget.tool.id == ToolId.split) {
+        final n = await countPdfPages(picked.first.bytes);
+        if (mounted) setState(() => _pageCount = n);
+      }
     }
   }
+
+  /// Empty range fields mean exactly what their hints show — page 1 and the
+  /// last page — so a picked PDF is ready to split without retyping them.
+  int? get _splitFrom => _fromCtrl.text.isEmpty
+      ? ((_pageCount ?? 0) > 0 ? 1 : null)
+      : int.tryParse(_fromCtrl.text);
+  int? get _splitTo => _toCtrl.text.isEmpty
+      ? ((_pageCount ?? 0) > 0 ? _pageCount : null)
+      : int.tryParse(_toCtrl.text);
 
   bool get _ready {
     switch (widget.tool.id) {
@@ -186,9 +210,7 @@ class _InputViewState extends State<_InputView> {
       case ToolId.imagesToPdf:
         return _images.isNotEmpty;
       case ToolId.split:
-        return _files.isNotEmpty &&
-            int.tryParse(_fromCtrl.text) != null &&
-            int.tryParse(_toCtrl.text) != null;
+        return _files.isNotEmpty && _splitFrom != null && _splitTo != null;
       case ToolId.unlock:
         return _files.isNotEmpty &&
             (_aadhaarMode
@@ -211,7 +233,7 @@ class _InputViewState extends State<_InputView> {
     final Future<List<String>> Function() task = switch (widget.tool.id) {
       ToolId.merge => () => pdf.merge([for (final f in _files) f.bytes]),
       ToolId.split => () =>
-          pdf.split(bytes!, int.parse(_fromCtrl.text), int.parse(_toCtrl.text)),
+          pdf.split(bytes!, _splitFrom!, _splitTo!),
       ToolId.compress => () => pdf.compress(bytes!),
       ToolId.compressTarget => () =>
           pdf.compressToTarget(bytes!, _targetKb * 1024),
@@ -227,7 +249,8 @@ class _InputViewState extends State<_InputView> {
           pdf.stamp(bytes!, _textCtrl.text.trim().toUpperCase(), _stampColor),
       ToolId.pageNumbers => () => pdf.pageNumbers(bytes!),
       ToolId.metadata => () => pdf.stripMetadata(bytes!),
-      ToolId.pdfToImages => () => pdf.pdfToImages(bytes!),
+      ToolId.pdfToImages => () =>
+          pdf.pdfToImages(bytes!, sourceName: _files.first.name),
       ToolId.pdfToText => () => pdf.pdfToText(bytes!),
       ToolId.pdfToWord => () =>
           ConversionService.instance.pdfToWord(bytes!, mode: _wordMode),
@@ -415,26 +438,34 @@ class _InputViewState extends State<_InputView> {
     ]);
   }
 
-  Widget _splitFields() => Row(children: [
-        Expanded(
-          child: NovaField(
-            controller: _fromCtrl,
-            label: 'From page',
-            hint: '1',
-            number: true,
-            onChanged: (_) => setState(() {}),
+  Widget _splitFields() => Column(children: [
+        Row(children: [
+          Expanded(
+            child: NovaField(
+              controller: _fromCtrl,
+              label: 'From page',
+              hint: '1',
+              number: true,
+              onChanged: (_) => setState(() {}),
+            ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: NovaField(
-            controller: _toCtrl,
-            label: 'To page',
-            hint: '5',
-            number: true,
-            onChanged: (_) => setState(() {}),
+          const SizedBox(width: 12),
+          Expanded(
+            child: NovaField(
+              controller: _toCtrl,
+              label: 'To page',
+              hint: (_pageCount ?? 0) > 0 ? '$_pageCount' : '',
+              number: true,
+              onChanged: (_) => setState(() {}),
+            ),
           ),
-        ),
+        ]),
+        if (_files.isNotEmpty && _pageCount != null)
+          ToolNote(
+              _pageCount! < 0
+                  ? 'This PDF is password-protected. Unlock it first with the Unlock tool.'
+                  : 'This PDF has $_pageCount ${_pageCount == 1 ? 'page' : 'pages'}.',
+              icon: Icons.description_outlined),
       ]);
 
   Widget _targetSize() {
@@ -533,6 +564,16 @@ class _InputViewState extends State<_InputView> {
           hint: 'PAID, APPROVED…',
           onChanged: (_) => setState(() {}),
         ),
+        const SizedBox(height: 10),
+        // One-tap presets — the tool promises PAID · APPROVED · custom.
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final word in const ['PAID', 'APPROVED', 'RECEIVED', 'COPY'])
+            NovaChip(
+              label: word,
+              selected: _textCtrl.text.trim().toUpperCase() == word,
+              onTap: () => setState(() => _textCtrl.text = word),
+            ),
+        ]),
         const SizedBox(height: 16),
         Text('Ink colour', style: Theme.of(context).textTheme.labelMedium),
         const SizedBox(height: 10),
@@ -619,3 +660,18 @@ class _InputViewState extends State<_InputView> {
         ],
       );
 }
+
+/// Page count of [bytes] off the UI isolate; -1 if locked or unreadable.
+/// Top-level on purpose: a closure created inside an instance method shares
+/// its context with the method's other closures (which capture `this`),
+/// making it unsendable to an isolate.
+Future<int> countPdfPages(Uint8List bytes) => Isolate.run(() {
+      try {
+        final d = sf.PdfDocument(inputBytes: bytes);
+        final c = d.pages.count;
+        d.dispose();
+        return c;
+      } catch (_) {
+        return -1;
+      }
+    });

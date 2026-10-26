@@ -9,6 +9,8 @@ import 'package:image/image.dart' as img;
 import 'document_text_service.dart';
 import 'raster_service.dart';
 import 'tool_notes.dart';
+import 'tool_errors.dart';
+import 'pdf_service.dart';
 import 'unicode_text_layout.dart';
 
 /// PDF → Word output style. Each mode shows every page's content once.
@@ -77,8 +79,11 @@ class ConversionService {
       var pictured = 0;
       for (final (i, p) in pages.indexed) {
         if (p.lines.isNotEmpty) {
-          for (final line in p.lines) {
-            docx.paragraph(line.text, align: alignFor(line.bounds, widths[i]));
+          final lines = [
+            for (final l in p.lines) (text: l.text, bounds: l.bounds)
+          ];
+          for (final para in paragraphsFrom(lines, widths[i])) {
+            docx.paragraph(para.text, align: para.align);
           }
         } else if (!p.isEmpty) {
           for (final l in p.text.split('\n')) {
@@ -108,7 +113,7 @@ class ConversionService {
     final bytes = docx.build();
     verifyDocx(bytes);
     final path = await _outPath('pdf_to_word', 'docx');
-    await File(path).writeAsBytes(bytes, flush: true);
+    await writeAtomic(path, bytes);
     return [path];
   }
 
@@ -123,10 +128,7 @@ class ConversionService {
     pdf.dispose();
 
     // Verify: the result must open and have pages.
-    final check = PdfDocument(inputBytes: bytes);
-    final ok = check.pages.count > 0;
-    check.dispose();
-    if (!ok) throw Exception('Generated PDF failed verification');
+    PdfService.verifyPdf(bytes);
 
     final r = writer.report;
     if (r.shaped.isNotEmpty) {
@@ -141,7 +143,7 @@ class ConversionService {
     ToolNotes.add(
         'Text, headings and line breaks are kept; images, tables and styling from Word are not.');
     final path = await _outPath('word_to_pdf', 'pdf');
-    await File(path).writeAsBytes(bytes, flush: true);
+    await writeAtomic(path, bytes);
     return [path];
   }
 
@@ -160,7 +162,7 @@ class ConversionService {
     final bytes = buildPptx(slides);
     verifyPptx(bytes, slides.length);
     final path = await _outPath('pdf_to_ppt', 'pptx');
-    await File(path).writeAsBytes(bytes, flush: true);
+    await writeAtomic(path, bytes);
     return [path];
   }
 }
@@ -184,11 +186,57 @@ String _xmlUnescape(String s) => s
     .replaceAll('&apos;', "'")
     .replaceAll('&amp;', '&');
 
+/// Rebuilds paragraphs from a page's visual lines so Word can reflow the
+/// text (one paragraph per PDF line left hard breaks everywhere). A line
+/// continues the one above when that line ran to the column's right edge
+/// (it wrapped), starts at the same indent, has the same size and sits at
+/// normal line spacing. Headings, short last lines, centred/right text and
+/// paragraph gaps still start a new paragraph.
+List<({String text, String? align})> paragraphsFrom(
+    List<({String text, Rect bounds})> lines, double pageWidth) {
+  final out = <({String text, String? align})>[];
+  if (lines.isEmpty) return out;
+  final colRight =
+      lines.fold(0.0, (m, l) => l.bounds.right > m ? l.bounds.right : m);
+  ({String text, Rect bounds})? prev;
+  String? prevAlign;
+  for (final l in lines) {
+    final align = alignFor(l.bounds, pageWidth);
+    final p = prev;
+    final h = p?.bounds.height ?? 0;
+    final continues = p != null &&
+        align == null &&
+        prevAlign == null &&
+        p.bounds.right >= colRight - 5 * h &&
+        (l.bounds.left - p.bounds.left).abs() < 4 &&
+        (l.bounds.height - h).abs() <= 0.2 * h &&
+        l.bounds.top > p.bounds.top &&
+        l.bounds.top - p.bounds.bottom < 0.6 * h;
+    final text = l.text.trim();
+    if (continues) {
+      final last = out.removeLast().text;
+      // A trailing hyphen is kept and joined without a space.
+      out.add((
+        text: last.endsWith('-') ? '$last$text' : '$last $text',
+        align: null
+      ));
+    } else {
+      out.add((text: text, align: align));
+    }
+    prev = l;
+    prevAlign = align;
+  }
+  return out;
+}
+
 /// Paragraph alignment from a text line's position on its page.
 String? alignFor(Rect bounds, double pageWidth) {
   final center = bounds.left + bounds.width / 2;
   final right = bounds.left + bounds.width;
+  // A full body line in a 1-inch-margin page is also "centred" with margins
+  // on both sides — only a clearly narrower line is a centred title.
   if ((center - pageWidth / 2).abs() < 45 &&
+      bounds.width < pageWidth * 0.6 &&
       bounds.left > 40 &&
       (pageWidth - right) > 40) {
     return 'center';

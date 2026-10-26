@@ -40,6 +40,7 @@ class ToolStages extends StatelessWidget {
           ToolProcessing s => ProcessingView(
               key: const ValueKey('processing'),
               progress: s.progress,
+              stage: s.stage,
               label: processingLabel),
           ToolSuccess s => SuccessView(
               key: const ValueKey('success'), paths: s.paths, notes: s.notes),
@@ -70,3 +71,11 @@ class ToolActionBar extends StatelessWidget {
     );
   }
 }
+
+/// Snackbar for tool screens: floats above the [ToolActionBar] instead of
+/// covering the main button while it is shown.
+SnackBar toolSnack(BuildContext context, String message) => SnackBar(
+      content: Text(message),
+      margin: EdgeInsets.fromLTRB(
+          16, 0, 16, 90 + MediaQuery.paddingOf(context).bottom),
+    );

@@ -112,6 +112,17 @@ void main() {
       expect(notes.join(), isNot(contains('no embedded font')));
     });
 
+    testWidgets('combining marks and conjuncts survive', (tester) async {
+      // "café" written as e + COMBINING ACUTE, and Hindi conjunct क्ष.
+      const decomposed = 'cafe\u0301 menu';
+      final paths = await tester.runAsync(() => ConversionService.instance
+          .wordToPdf(docx([('$decomposed · क्षमा', null)])));
+      final text = textOf(readBytes(paths!.single));
+      expect(text, contains('caf'));
+      expect(text.contains('cafe\u0301') || text.contains('café'), isTrue);
+      expect(text, contains('क्षमा'));
+    });
+
     testWidgets('unsupported scripts are reported, not silently dropped',
         (tester) async {
       final notes = <String>[];
@@ -131,6 +142,29 @@ void main() {
       final pdf = readBytes(paths!.single);
       expect(pageCount(pdf) > 1, isTrue);
       expect(textOf(pdf), contains('Line 119'));
+    });
+  });
+
+  group('PDF → Word end-to-end', () {
+    test('editable mode: every line exactly once, no page pictures', () async {
+      final notes = <String>[];
+      final paths = await ToolNotes.collect(
+          notes,
+          () => ConversionService.instance
+              .pdfToWord(samplePdf(3, label: 'quarterly report')));
+      final docx = readBytes(paths.single);
+      verifyDocx(docx);
+      final xml = utf8.decode(ZipDecoder()
+          .decodeBytes(docx)
+          .findFile('word/document.xml')!
+          .content as List<int>);
+      for (var i = 1; i <= 3; i++) {
+        expect(RegExp('Page $i quarterly report').allMatches(xml).length, 1,
+            reason: 'page $i text must appear exactly once');
+      }
+      expect(xml, isNot(contains('<w:drawing>')));
+      expect(RegExp('<w:br w:type="page"/>').allMatches(xml).length, 2);
+      expect(notes.join(), contains('Editable mode'));
     });
   });
 
@@ -173,10 +207,39 @@ void main() {
           throwsException);
     });
 
+    test('wrapped lines rejoin into reflowable paragraphs', () {
+      // 11pt body text on A4, column 50–545, 14pt line pitch.
+      ({String text, Rect bounds}) line(String t, double top,
+              {double left = 50, double right = 544, double h = 11}) =>
+          (text: t, bounds: Rect.fromLTRB(left, top, right, top + h));
+      final paras = paragraphsFrom([
+        line('Annual Report', 40, left: 230, right: 365, h: 18), // centred
+        line('Section 1. Results', 80, right: 160, h: 13), // heading
+        line('The board approved three priorities for the', 100),
+        line('coming year, each with a named owner and a', 114),
+        line('quarterly review.', 128, right: 140), // short last line
+        line('Working capital remained under control.', 150), // full width
+        // 19pt gap below a full line: a new paragraph, not a wrap
+        line('A new para after a gap', 180),
+        line('that wraps once.', 194, right: 150),
+      ], 595);
+      expect(paras.map((p) => p.text), [
+        'Annual Report',
+        'Section 1. Results',
+        'The board approved three priorities for the coming year, each with '
+            'a named owner and a quarterly review.',
+        'Working capital remained under control.',
+        'A new para after a gap that wraps once.',
+      ]);
+      expect(paras.first.align, 'center');
+    });
+
     test('alignment detection', () {
       expect(alignFor(const Rect.fromLTWH(200, 0, 195, 10), 595), 'center');
       expect(alignFor(const Rect.fromLTWH(400, 0, 150, 10), 595), 'right');
       expect(alignFor(const Rect.fromLTWH(50, 0, 300, 10), 595), isNull);
+      // Full body line with 1-inch margins: left, not centred (regression).
+      expect(alignFor(const Rect.fromLTRB(72, 0, 523, 10), 595), isNull);
     });
   });
 

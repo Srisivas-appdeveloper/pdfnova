@@ -2,13 +2,15 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_motion.dart';
+import 'nova_mark.dart';
 
-/// Thin ring progress with a large serif percentage. The arc eases toward
-/// each new value instead of jumping, and a soft comet glides along the
-/// unfinished track so the screen reads as "alive" without being busy.
+/// Thin ring progress. With a measured [progress] it shows the arc and a
+/// large serif percentage (easing toward each new value). With null — the
+/// amount of work is unknown — it shows a slowly rotating arc around the
+/// PDF Nova mark instead of inventing a number.
 class NovaProgress extends StatefulWidget {
   const NovaProgress({super.key, required this.progress, this.size = 184});
-  final double progress;
+  final double? progress;
   final double size;
 
   @override
@@ -30,8 +32,24 @@ class _NovaProgressState extends State<NovaProgress>
   Widget build(BuildContext context) {
     final c = context.nova;
     final reduced = NovaMotion.reduced(context);
+    if (widget.progress == null) {
+      return SizedBox.square(
+        dimension: widget.size,
+        child: AnimatedBuilder(
+          animation: _spin,
+          builder: (context, child) => CustomPaint(
+            painter: _SpinnerPainter(
+                phase: reduced ? 0 : _spin.value,
+                track: c.surfaceAlt,
+                arc: c.accent),
+            child: child,
+          ),
+          child: const Center(child: NovaMark(size: 56)),
+        ),
+      );
+    }
     return TweenAnimationBuilder<double>(
-      tween: Tween(end: widget.progress.clamp(0.0, 1.0)),
+      tween: Tween(end: widget.progress!.clamp(0.0, 1.0)),
       duration: NovaMotion.medium,
       curve: NovaMotion.emphasized,
       builder: (context, p, _) => SizedBox.square(
@@ -132,4 +150,29 @@ class _RingPainter extends CustomPainter {
   @override
   bool shouldRepaint(_RingPainter old) =>
       old.progress != progress || old.phase != phase || old.arc != arc;
+}
+
+class _SpinnerPainter extends CustomPainter {
+  _SpinnerPainter(
+      {required this.phase, required this.track, required this.arc});
+  final double phase;
+  final Color track;
+  final Color arc;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const stroke = 5.0;
+    final rect = (Offset.zero & size).deflate(stroke / 2);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+    canvas.drawArc(rect, 0, math.pi * 2, false, paint..color = track);
+    canvas.drawArc(rect, -math.pi / 2 + math.pi * 2 * phase, math.pi * 0.55,
+        false, paint..color = arc);
+  }
+
+  @override
+  bool shouldRepaint(_SpinnerPainter old) =>
+      old.phase != phase || old.arc != arc || old.track != track;
 }

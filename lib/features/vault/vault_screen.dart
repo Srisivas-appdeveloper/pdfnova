@@ -9,11 +9,13 @@ import '../../core/widgets/nova_controls.dart';
 import '../../core/widgets/nova_entrance.dart';
 import '../../core/widgets/nova_dialog.dart';
 import '../../services/file_service.dart';
+import '../../services/secure_window.dart';
 import '../../services/vault_service.dart';
 import '../files/file_row.dart';
 import '../tool/tool_header.dart';
 import '../tool/tool_stages.dart';
 import '../home/tools.dart';
+import '../viewer/viewer_screen.dart';
 
 /// Vault: biometric-gated, AES-256-GCM encrypted private folder (see
 /// VaultService). Files are encrypted on the way in, decrypted only into
@@ -34,15 +36,20 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
   List<VaultEntry> _entries = [];
   int _legacyCount = 0;
   String? _error;
-  // True while we sent the user to another screen ourselves (the file
-  // picker, or another app showing a decrypted copy). That pause is ours:
-  // it must not re-lock the vault or wipe the file under the viewer.
+  // True while we sent the user to the system file picker ourselves. That
+  // pause is ours: it must not re-lock the vault mid-pick.
   bool _ownPause = false;
+  DateTime? _pausedAt;
+
+  /// Even after the vault's own hand-off to the picker, coming back
+  /// after longer than this requires authenticating again.
+  static const relockAfter = Duration(minutes: 2);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    SecureWindow.set(true);
     // Decrypted copies from an earlier session must not linger.
     _vault.purgeTemp();
   }
@@ -50,16 +57,33 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    SecureWindow.set(false);
     _lock();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _ownPause = false;
-    // Leaving the app re-locks the vault and wipes decrypted copies.
-    if (state == AppLifecycleState.paused && _unlocked && !_ownPause) {
-      setState(_lock);
+    // Policy (docs/SECURITY.md): leaving the app re-locks the vault, except
+    // for the vault's own hand-off to the file picker — and even that
+    // re-lock if the user is away longer than [relockAfter].
+    if (state == AppLifecycleState.paused) {
+      _pausedAt = DateTime.now();
+      if (_unlocked && !_ownPause) {
+        _closeViewer();
+        setState(_lock);
+      }
+    }
+    if (state == AppLifecycleState.resumed) {
+      final away = _pausedAt == null
+          ? Duration.zero
+          : DateTime.now().difference(_pausedAt!);
+      _ownPause = false;
+      _pausedAt = null;
+      if (_unlocked && away > relockAfter) {
+        _closeViewer();
+        setState(_lock);
+      }
     }
   }
 
@@ -143,11 +167,30 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
     });
   }
 
+  /// Opens in the app's own Reader. Handing the decrypted copy to another
+  /// app let it cache the file and screenshot it, outside the vault's
+  /// re-lock; here screenshots stay blocked and the copy is deleted when
+  /// the Reader closes (or the vault locks).
   Future<void> _open(VaultEntry e) => _run(() async {
         final file = await _vault.exportToTemp(e);
-        _ownPause = true;
-        await FileService.instance.open(file.path);
+        if (!mounted) return;
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => ViewerScreen(
+              tool: allTools.firstWhere((t) => t.id == ToolId.viewer),
+              initialPath: file.path),
+        ));
+        try {
+          file.parent.deleteSync(recursive: true);
+        } catch (_) {}
       });
+
+  /// Closes a Reader showing a vault file, so locking hides it too.
+  void _closeViewer() {
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      Navigator.of(context).popUntil((r) => r == route);
+    }
+  }
 
   Future<void> _delete(VaultEntry e) async {
     final ok = await _confirm(

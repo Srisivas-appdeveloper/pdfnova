@@ -1,6 +1,6 @@
 # PDF Nova — Full Feature Reference
 
-> **Fully offline PDF toolkit for Android & iOS, built with Flutter.**
+> **Fully offline PDF toolkit for Android, built with Flutter.**
 > Every operation runs on the device. No file is ever uploaded.
 
 | | |
@@ -8,9 +8,9 @@
 | App name | PDF Nova |
 | Package / bundle ID | `com.kalainova.pdf` |
 | Version | 1.0.0 (build 1) |
-| Platforms | Android (primary), iOS (Scan tool hidden) |
+| Platform | **Android only.** The `ios/`, `macos/`, `linux/`, `windows/`, `web/` folders are leftover scaffolding and are not maintained or tested. |
 | Framework | Flutter (Dart SDK ≥ 3.3) |
-| Tool count | **26 tools** in 5 sections (25 on iOS) |
+| Tool count | **26 tools** in 5 sections |
 | Network use | None for documents. Only the local WiFi Share server opens a socket, and it stays on the LAN. |
 
 ---
@@ -82,8 +82,8 @@ Tool registry: [lib/features/home/tools.dart](lib/features/home/tools.dart)
 - Output: `merged_<timestamp>.pdf`
 
 ### Split
-- Pick one PDF, enter **From page** and **To page**.
-- Out-of-range values are clamped to the document (e.g. "To 999" stops at the last page).
+- Pick one PDF; it shows **"This PDF has N pages"** (or that it is password-protected). Enter **From page** and **To page** — left empty they mean page 1 and the last page, exactly as their hints show.
+- "To" past the end is clamped to the last page; "From" after "To", or "From" past the last page, is refused with a clear message.
 - Output: `split_<from>_<to>_<timestamp>.pdf`
 
 ### Pages (Organize)
@@ -97,29 +97,30 @@ Screen: [lib/features/organize/organize_screen.dart](lib/features/organize/organ
 
 ### Batch
 Screen: [lib/features/batch/batch_screen.dart](lib/features/batch/batch_screen.dart)
-- Pick many PDFs, choose **one** action, run it on all of them:
-  - Compress
-  - Protect (asks for a password)
-  - Watermark (asks for text)
-  - Clean metadata
-- The success screen lists every output with **Share all**.
+- Pick many PDFs, choose **one** action, run it on all of them: Compress · Protect (password) · Watermark (text) · Clean metadata.
+- **Real progress** ("File 2 of 5").
+- **One bad file doesn't cost the others:** successful files are kept, failed ones are named in the result ("4 of 5 files done. Not processed: scan.pdf (…)"). Only an all-failed run is an error.
+- Outputs are named after their source — `Lease_Agreement_watermarked.pdf` — with `_2`, `_3` if a name repeats; nothing is overwritten.
+- Picking Watermark or Protect focuses the text/password field (and switching action clears it, so watermark text never becomes a password).
+- The success screen lists every output with **Save all** and **Share all**.
 
 ---
 
 ## 3. Shrink & convert tools
 
 ### Compress (smart, two-pass)
-Runs on a background isolate so the progress ring never freezes.
-1. **Lossless pass** — Syncfusion stream compression at the best level. Text stays selectable.
-2. If that saves **less than 20%** (typical for scanned or image-heavy PDFs), a **lossy pass** renders pages at 1.5× and re-encodes them as JPEG (quality 82).
-3. Whichever result is **smaller** is kept.
+Runs on a background isolate so the UI never freezes.
+1. **Lossless pass** — stream compression; text stays selectable.
+2. If that saves **less than 20%**, a **lossy pass** re-encodes pages as JPEG.
+3. The **smaller** result is kept and the other attempt's file is deleted.
+- The result states the **measured** sizes ("Reduced from 2.4 MB to 610 KB (75% smaller)", or "already well compressed"), and says when pages became images (text no longer selectable).
+- Every page must survive: a pass that can't render a page is discarded, never shortened.
 
 ### Fit to size (guaranteed size)
 - Target slider from **50 KB to 5 MB**, plus presets: 100 KB · 200 KB · 500 KB · 1 MB · 2 MB · 5 MB.
-- Shows the original size and an estimated "~N% smaller" badge.
-- Steps down through six render scale / JPEG quality pairs (2.0×/80 → 0.7×/30) until the pages fit within 92% of the target (8% headroom for PDF structure).
-- If nothing fits, it returns a best-effort file at 0.7× / quality 25 (`fit_best_effort_…`).
-- The UI states clearly that output is image-based: text can no longer be selected. Built for government and job portal upload limits.
+- **Lossless first:** if stream compression already fits the target (or the file is already under it), that result is kept — text stays sharp and selectable, and a file is never made bigger.
+- Otherwise steps down through six render scale / JPEG quality pairs until the pages fit, with headroom for PDF structure.
+- The result reports the **measured** file size against the target and whether text is still selectable. If the target can't be reached, it says so and gives the smallest result it can make (`fit_best_effort_…`).
 
 ### Images → PDF
 - Pick photos from the gallery; thumbnails show with remove buttons. Re-picking appends.
@@ -128,7 +129,7 @@ Runs on a background isolate so the progress ring never freezes.
 
 ### PDF → Images
 - Renders every page at 2× (~144 dpi), composites onto white (no black transparent areas), saves as JPEG (quality 92).
-- Output folder: `PDFNova/images_<timestamp>/page_1.jpg …`
+- Images are named after the PDF — `Annual_Report_page_1.jpg …` — in `PDFNova/images_<timestamp>/`. **Save all** saves every page to Downloads.
 
 ### PDF → Text
 - Extracts each page's text layer (line-based extraction — Syncfusion's plain extractor mis-decodes text after a font switch), with **on-device OCR only for pages that have no text**.
@@ -141,7 +142,7 @@ Two modes, chosen on the tool screen — **each page's content appears once** (t
 
 | Mode | Result |
 |---|---|
-| **Editable text** (default) | Real paragraphs with centre/right alignment detected from line positions. Scanned pages are OCR'd. Pages with no readable text at all are added as a picture (and the result says how many). Images and exact layout are not carried over. |
+| **Editable text** (default) | Real paragraphs: wrapped lines are re-joined so text reflows in Word (headings, short last lines and paragraph gaps still split). Centre/right alignment detected from line positions; full-width body lines are never mistaken for centred. Scanned pages are OCR'd. Pages with no readable text at all are added as a picture (and the result says how many). Images and exact layout are not carried over. |
 | **Exact look** | Every page as a picture (keeps aspect ratio, fits the page). Looks identical; not editable. |
 
 - The generated .docx is **re-opened and checked** (required parts, body, image links) before success is reported.
@@ -190,8 +191,8 @@ Two modes, switchable with a segmented control:
 
 ### Vault
 Screen: [lib/features/vault/vault_screen.dart](lib/features/vault/vault_screen.dart) · Service: [lib/services/vault_service.dart](lib/services/vault_service.dart) · Details: [docs/SECURITY.md](docs/SECURITY.md)
-- **AES-256-GCM encrypted** (authenticated), key in Android Keystore / iOS Keychain (this device only). File names are encrypted too.
-- **Unlock with fingerprint, face, or device PIN/pattern**; **fails closed** with no screen lock. Re-locks when you leave the app; decrypted viewing copies live only in private temp storage and are wiped on lock.
+- **AES-256-GCM encrypted** (authenticated), key in the Android Keystore (this device only). File names are encrypted too.
+- **Unlock with fingerprint, face, or device PIN/pattern**; **fails closed** with no screen lock. Re-locks when you leave the app. Files open in PDF Nova's **own Reader** — never handed to another app — with screenshots blocked; the decrypted copy lives only in private temp storage, is deleted when the Reader closes, and locking also closes the Reader.
 - Tampered or damaged files are detected and kept (never auto-deleted).
 - **Migration:** files from the old unencrypted vault are offered for encryption; each is verified (decrypt + checksum) before its plain copy is removed. Failures leave the original untouched.
 - Excluded from Android cloud backup / device transfer (the key cannot be restored elsewhere).
@@ -210,14 +211,14 @@ Screen: [lib/features/scan/scan_screen.dart](lib/features/scan/scan_screen.dart)
   - import from gallery as well as camera
 - The resulting PDF is copied into the PDF Nova output folder.
 - Cancelling shows a "Scan cancelled — Try again" screen, never a stuck spinner.
-- Hidden from the grid on iOS automatically.
 
 ### OCR
 Service: [lib/services/ocr_service.dart](lib/services/ocr_service.dart)
-- Renders each page at 2× and runs **ML Kit Text Recognition** on device.
-- **English (Latin) first**; if a page yields under 8 characters, a **Devanagari** pass runs (Hindi, Marathi, etc.) and the better result wins.
+- Renders each page and runs **ML Kit Text Recognition** on device.
+- **English (Latin) first**; if a page yields almost nothing, a **Devanagari** pass runs (Hindi, Marathi…). The Devanagari model is **bundled** (works offline).
+- Verified on the release build: an image-only Hindi page was read back correctly (one vowel-sign miss in three lines).
 - Output `.txt` has page markers (`───── Page 1 ─────`).
-- If nothing is recognised: *"No readable text was found in this PDF."*
+- Limitation: a page mixing English and Hindi is read with the Latin model only (the Devanagari pass runs only when Latin finds almost nothing).
 
 ### Sign
 Screen: [lib/features/signature/signature_screen.dart](lib/features/signature/signature_screen.dart)
@@ -225,12 +226,12 @@ Three stages:
 1. **Draw** the signature on a pad (dark ink pen). Clear and redraw as needed.
 2. **Choose the PDF** to sign.
 3. **Position** on a live page preview: pick the page, drag the signature, resize with a slider.
-- Preview coordinates map **1:1** to the PDF (relative centre + relative width), so it lands exactly where it was shown.
+- Preview coordinates map **1:1** to the PDF (relative centre + relative width, using the signature's real aspect ratio), so it lands exactly where it was shown — verified on device to within ~1 pt. The preview keeps the page's own shape (Letter, landscape) on white paper.
 - Output: `signed_<timestamp>.pdf`
 
 ### Fill form
 Screen: [lib/features/formfill/formfill_screen.dart](lib/features/formfill/formfill_screen.dart)
-- Lists every **text field** in the PDF's AcroForm with its current value, one input per field.
+- Lists every **text field** in the PDF's AcroForm with its current value, one input per field, labelled readably: the form's own tooltip, or the field name made human (`full_name` → "Full name", `dob` → "Date of birth").
 - **"Lock after filling"** toggle (on by default) flattens the form so values become permanent print.
 - Output: `filled_<timestamp>.pdf`
 
@@ -239,7 +240,7 @@ Screen: [lib/features/notes/notes_screen.dart](lib/features/notes/notes_screen.d
 - **One quick note, shared with the Android Home-Screen widget** (same storage). Autosaves as you type, saves when the app is backgrounded, and picks up widget edits when you return.
 - If the note was edited in both places at once, **both versions are kept** (merged), never overwritten.
 - **Save PDF** exports title, date and body through the same Unicode-correct writer as Word → PDF, into the PDFNova folder; it appears in Files under **Notes**.
-- iOS (no widget): the note is stored in the app.
+- **Earlier versions** (history button): up to 10 previous versions are kept automatically (at most one per 5 minutes of typing, always on a conflict or restore). Restoring keeps the replaced text as a version, so a restore can be undone.
 
 ---
 
@@ -250,8 +251,8 @@ Screen: [lib/features/notes/notes_screen.dart](lib/features/notes/notes_screen.d
 - Adds **"1 / N"** at the bottom centre of every page (Helvetica 11 pt, dim grey).
 
 ### Stamp
-- Custom text (auto-uppercased), e.g. PAID, APPROVED, REJECTED.
-- Four colour choices: red, green, violet, cyan.
+- One-tap presets **PAID · APPROVED · RECEIVED · COPY**, or custom text (auto-uppercased).
+- Four ink colours: red, green, blue, amber.
 - Drawn in the **top-right corner of every page**, bold 26 pt, tilted −12°, with a rectangular border, 85% opacity.
 
 ### Reader
@@ -272,7 +273,7 @@ Screen: [lib/features/wifishare/wifishare_screen.dart](lib/features/wifishare/wi
 - Shows a **QR code** and URL; the other device opens it in **any browser** — no app needed, **no internet needed**, works over a **mobile hotspot**.
 - Picks the right network interface: prefers WiFi/hotspot/ethernet/USB tethering and skips cellular and VPN addresses that another phone could never reach.
 - Tries ports **8765–8770** if one is busy.
-- Serves only the shared file (everything else returns 404) and sends a correct download filename, including names with spaces or non-ASCII characters.
+- Serves only the shared file (everything else returns 404), typed as `application/pdf`, with a correct download filename, including names with spaces or non-ASCII characters.
 - **Stop sharing** shuts the server down.
 
 ---
@@ -298,10 +299,18 @@ Screen: [lib/features/files/files_tab.dart](lib/features/files/files_tab.dart) �
 - **By tool**: one folder per tool actually used, with count and latest time; opens with a container transform.
 - **All files**: **search by name**, **filter by type** (PDF · Word · Slides · Images · Text), **sort** (newest, oldest, name, largest).
 - **Multi-select** (long-press): Share, Remove from history, Delete.
-- Per-file menu: Open · Share · Save to Downloads · **Rename** (keeps extension, refuses to overwrite) · **Remove from history** (file stays) · **Delete file** (with confirmation).
+- Per-file menu: **Details** · Open · Share · Save to Downloads · **Rename** (keeps extension, refuses to overwrite) · **Remove from history** (file stays) · **Delete file** (with confirmation).
+- **Details** shows type, source tool, created and modified time, size, page count (read off the UI thread; "password-protected" when it can't be read) and availability ("No longer on this phone" when missing).
 - **Safety:** rename/delete only ever touch files PDF Nova created inside its own storage; anything else can only be removed from the list. Sizes are read from disk each time.
 - Missing files are labelled, and **Clean up N** removes their entries in one tap.
 - Old history entries (from before this version) are upgraded in place without losing any.
+
+### Search inside files (opt-in)
+Service: [lib/services/document_index.dart](lib/services/document_index.dart) · Setting: Settings → Search → **Search inside files** (off by default)
+- Indexes the text of PDFs PDF Nova created — **never the vault** — on this phone only. Turning it off deletes the index; **Rebuild index** starts fresh.
+- New outputs are indexed as they're made; renames, removals and missing-file cleanup keep the index in step; changed files are re-indexed (SHA-256 fingerprint).
+- In Files → All files, a search shows **File names** and **Inside files** as separate sections; content hits show the file, **page number** and a highlighted snippet, and open the **Reader at that page**.
+- Scanned pages (no text layer) are not searchable — the result says so.
 
 ### Success screen
 View: [lib/features/tool/success_view.dart](lib/features/tool/success_view.dart)
@@ -312,7 +321,8 @@ View: [lib/features/tool/success_view.dart](lib/features/tool/success_view.dart)
   - Android 9 and below: direct write plus a media scan.
   - If something fails, it falls back to app-specific external storage and says where the file went. It never fails silently.
 - **Share** through the system share sheet ("Made with PDF Nova").
-- Multi-output tools (Batch, PDF → Images) list every file with **Share all**.
+- Multi-output tools (Batch, PDF → Images) list every file with **Save all** and **Share all**.
+- **Every PDF output is a single clean revision:** the source is never left inside the file as an earlier revision (which would let someone cut a watermark, stamp or filled form back to the original).
 
 ### Built-in .pptx viewer
 Screen: [lib/features/viewer/ppt_viewer_screen.dart](lib/features/viewer/ppt_viewer_screen.dart)
@@ -321,16 +331,22 @@ Screen: [lib/features/viewer/ppt_viewer_screen.dart](lib/features/viewer/ppt_vie
 - Previous/next navigation, "Slide N of M", and save to Downloads.
 
 ### Processing view
-- Thin progress ring with a tool-specific label (e.g. "Building your Word document", "Squeezing to size").
+- Progress ring with a tool-specific label.
+- **Honest progress:** a percentage is shown only when the tool measures it (e.g. Batch: "File 2 of 5"). Otherwise the ring turns slowly around the PDF Nova mark — no invented numbers.
 - "Processing on your phone — nothing leaves it."
-- Progress eases toward 90% while the real work runs, then snaps to 100% when it finishes. The wait shown is always the real wait.
-- Back button and back gesture are blocked during processing so work is never abandoned halfway.
+- Back is blocked while a file is being written.
 
 ### Error messages
-Friendly, specific messages instead of stack traces:
-- Wrong password → check the name spelling and year.
-- No text found → "No readable text was found in this PDF."
-- Anything else → "The file may be corrupted — try another copy."
+One mapper ([tool_errors.dart](lib/services/tool_errors.dart)), no stack traces or paths:
+- Locked PDF in Unlock → check the name spelling and year; in any other tool → "This PDF is password-protected. Unlock it first".
+- Phone out of storage → says so; nothing was saved.
+- Invalid input (e.g. split range) → the specific reason.
+- No text found / anything else → calm, specific fallback.
+
+### Output safety
+- Every output is written to a temporary `.part` file and renamed only when complete.
+- Every generated PDF is re-opened and its page count checked before it's saved; Protect also checks the file **won't** open without the password.
+- A failed run leaves no partial file and no history entry.
 
 ---
 
@@ -394,14 +410,14 @@ All transitions share one curve family ([app_motion.dart](lib/core/theme/app_mot
 | **Splash → Home** | The artwork **flies (Hero)** from full screen into the home header while home fades in; header lines and cards rise into place in a stagger. |
 | **Open / close a tool** | **Container transform**: the tapped card grows into the full tool screen and shrinks back into the same card on close. Same for Files folders. |
 | **Changing tabs** | **Shared-axis slide** that follows direction (right tab → content slides left). The tab pill glides between items; icons switch outline → filled with a spring. |
-| **Other screens** (Android) | Parallax push: new page slides in from the right while the one behind drifts left and dims. iOS keeps the native swipe-back transition. |
+| **Other screens** | Parallax push: new page slides in from the right while the one behind drifts left and dims. |
 | **Tool stages** | Input → processing → success **fade-through**. Signature steps slide sideways with a 3-step progress bar. |
 | **Dialogs / sheets** | Dialogs rise and scale up from 92% over a scrim; sheets glide up on the same curve. |
 | **Processing** | Thin progress ring with a serif percentage; a soft comet travels the unfinished track. |
 | **Success** | Ring pops open with a fading pulse, then the check mark draws itself. |
 | **Details** | Cards and buttons press in with a spring; segmented controls slide their thumb; page rotation in *Pages* turns smoothly; Reader night mode fades between normal and inverted; artwork has scroll parallax and stretches on overscroll; theme changes cross-fade. |
 
-**Reduce motion**: when the phone asks for less motion, or the Settings toggle is on, transitions become short fades and entrance animations are skipped.
+**Reduce motion**: when the phone asks for less motion, or the Settings toggle is on, transitions become short fades and entrance animations are skipped — including tool and folder cards, which open with a plain fade instead of growing.
 
 ## 10. Architecture
 
@@ -473,11 +489,11 @@ lib/
 | Tool outputs (incl. Notes PDFs) | `<app documents>/PDFNova/<name>_<timestamp>.<ext>` (older Notes PDFs: `<app documents>/<Title>_Note_<ts>.pdf`) |
 | PDF → Images | `<app documents>/PDFNova/images_<timestamp>/page_N.jpg` |
 | Vault (encrypted) | `<app documents>/PDFNovaVault/<id>.nvd` + `<id>.nvm` |
-| Vault viewing copies | `<temp>/vault_open/` — wiped on lock |
-| Vault key | Android Keystore / iOS Keychain (via flutter_secure_storage) |
+| Vault viewing copies | `<temp>/vault_open/` — deleted when the Reader closes, and on lock |
+| Vault key | Android Keystore (via flutter_secure_storage) |
 | Saved by the user | `Download/PDFNova/` (public, Android) |
 | Output history, counters, theme | Hive boxes `recents` (≤200, schema v2) and `settings` |
-| Quick note | Android SharedPreferences `notes_widget_prefs` (shared with the widget); Hive on iOS |
+| Quick note | Android SharedPreferences `notes_widget_prefs` (shared with the widget) |
 
 ## 13. Permissions
 
@@ -513,23 +529,25 @@ The re-enable plan is marked in code with `ADS DISABLED FOR RELEASE` comments (i
 - **Word → PDF** keeps text, headings and line breaks only (no images, tables or styling). Shaped-script paragraphs are images with a hidden text layer: they look right and are searchable, but are slightly heavier than vector text, and extracted text may lose the space between a Latin label and the shaped words.
 - **Syncfusion Community License** is free under US$1M revenue and ≤5 developers. Recheck before scaling.
 
-### Fixed in this version (were open)
-Word → PDF Unicode loss · PDF → Word duplicate content · PDF → PPT stretching · unencrypted vault · Notes app/widget split · Notes PDFs outside PDFNova · fake "PDF to Excel" folder · iOS Face ID string missing · placeholder tests · **pages getting the wrong size/rotation** in Merge (mixed sizes), Images → PDF (landscape photos) and Pages (rotations) — found by the new tests · header overflow with large system text · unhandled error log when a tool failed quickly · low-contrast secondary text (WCAG AA now met).
+### Fixed (verified by tests or on device)
+Word → PDF Unicode loss · PDF → Word duplicate content · PDF → PPT stretching · unencrypted vault · Notes app/widget split · Notes PDFs outside PDFNova · fake "PDF to Excel" folder · placeholder tests · pages getting the wrong size/rotation in Merge, Images → PDF and Pages · header overflow with large text · low-contrast text · **release build failing (R8)** · **Hindi OCR pass missing its model** · tab bar / home header / search bar overflowing at 130–200% text · invented progress percentages · compress leaving an orphan file or dropping pages · partial outputs on failure · misleading "check the Aadhaar name" error for locked PDFs in other tools · split accepting From > To · vault: duplicate entries after interrupted migration, crash debris, partial writes on disk-full, unreadable-key handling, app-switcher previews.
 
 ### Still open
-- **iOS** is not verified on a device or simulator run (see Build & run). The Scan tool stays Android-only.
+- **Android only.** Other platform folders are leftover scaffolding and are not maintained or tested.
 - **WiFi Share** has no access token or multi-file sessions yet ([docs/SECURITY.md](docs/SECURITY.md)).
-- **Quick note** is not encrypted; vault screenshots are not blocked (`FLAG_SECURE`).
-- No cancellation for long-running tools; progress is an estimated ramp, not measured.
-- Compress / Fit to size / PDF → Images / PDF → PPT / OCR depend on platform plugins (PDFium, ML Kit) and are covered by device testing, not unit tests.
-- **Unused Android resources**: `pdfnova_widget_info.xml`, `pdfnova_widget_layout.xml`, `pdfnova_widget_2x1.xml` are not registered in the manifest.
-- README is out of date (tool count, PDF ↔ Word claims).
+- **Quick note** is not encrypted.
+- **No cancellation** for long-running tools.
+- OCR on pages mixing English and Hindi reads the English only.
+- Compress image pass, Fit to size, PDF → Images, PDF → PPT rendering and OCR depend on PDFium/ML Kit and are verified on the emulator, not by unit tests.
+- Release signing: `android/key.properties` is not present here, so release builds fall back to debug signing.
+- **Unused Android resources**: `pdfnova_widget_info.xml`, `pdfnova_widget_layout.xml`, `pdfnova_widget_2x1.xml`.
+- README is out of date.
 
 ## 16. Build & run
 
 ```bash
 flutter pub get
-flutter test                # 80 tests: services, conversions, vault, history, widgets
+flutter test                # services, conversions, vault, pipeline, history, notes, widgets/UI
 flutter run                 # debug on a connected device
 flutter build apk --release # Android release APK
 flutter build appbundle     # Play Store bundle
@@ -545,4 +563,4 @@ tool/local_build.sh build apk --profile --target-platform android-arm64   # smal
 
 - **Release signing**: put credentials in `android/key.properties` (gitignored): `storeFile`, `storePassword`, `keyAlias`, `keyPassword`. Without it, release builds fall back to debug signing.
 - **Android**: `MainActivity` extends `FlutterFragmentActivity` (required by `local_auth`). Java/Kotlin target 17. minSdk ≥ 23 (secure storage).
-- **iOS**: Face ID purpose string, app icons from the PDF Nova mark, and a launch screen in the Folio canvas colour (light/dark) are configured. Scan is hidden automatically.
+- **Other platforms**: not supported. Leftover iOS configuration (Face ID string, icons, launch screen from an earlier pass) is not maintained.

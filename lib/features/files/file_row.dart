@@ -202,6 +202,8 @@ class FileRow extends StatelessWidget {
             ),
             Divider(height: 1, color: c.border),
             const SizedBox(height: 6),
+            action(Icons.info_outline_rounded, 'Details',
+                () => showFileDetails(context, record)),
             if (exists) ...[
               action(Icons.open_in_new_rounded, 'Open',
                   () => openAnyFile(context, _path)),
@@ -282,7 +284,8 @@ class FileRow extends StatelessWidget {
                 children: [
                   Text('Rename', style: t.headlineSmall),
                   const SizedBox(height: 16),
-                  NovaField(controller: ctrl, hint: 'File name', autofocus: true),
+                  NovaField(
+                      controller: ctrl, hint: 'File name', autofocus: true),
                   if (error != null) ...[
                     const SizedBox(height: 8),
                     Text(error!,
@@ -371,6 +374,95 @@ Future<void> confirmDeleteOutputs(
                 ),
               ]),
             ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+const _kindLabel = {
+  FileKind.pdf: 'PDF document',
+  FileKind.word: 'Word document (.docx)',
+  FileKind.slides: 'PowerPoint (.pptx)',
+  FileKind.image: 'Image',
+  FileKind.text: 'Text file',
+  FileKind.other: 'File',
+};
+
+String _dateTime(DateTime t) =>
+    '${t.day}/${t.month}/${t.year} ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+/// Sheet with what is actually known about a file, read from disk when
+/// opened (page count is parsed off the UI thread).
+void showFileDetails(BuildContext context, OutputRecord record) {
+  showNovaSheet(
+    context: context,
+    builder: (sheet) {
+      final c = sheet.nova;
+      final t = Theme.of(sheet).textTheme;
+      final (icon, (fg, bg)) = fileLook(sheet, record.path);
+      Widget row(String label, String value, {Color? color}) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(width: 110, child: Text(label, style: t.bodyMedium)),
+                Expanded(
+                  child: Text(value,
+                      style: t.bodyLarge?.copyWith(color: color ?? c.ink)),
+                ),
+              ],
+            ),
+          );
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+          child: FutureBuilder<FileDetails>(
+            future: FileDetails.read(record.path),
+            builder: (context, snap) {
+              final d = snap.data;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    NovaIconTile(icon: icon, fg: fg, bg: bg, size: 42),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(record.name,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.titleMedium),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  Divider(height: 1, color: c.border),
+                  const SizedBox(height: 8),
+                  row('Type', _kindLabel[kindOf(record.path)]!),
+                  row('Made with', record.tool),
+                  row('Created', _dateTime(record.time)),
+                  if (d == null)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: LinearProgressIndicator(minHeight: 2),
+                    )
+                  else if (!d.exists)
+                    row('Status',
+                        'No longer on this phone. It may have been deleted or moved by another app.',
+                        color: c.danger)
+                  else ...[
+                    row('Size', formatBytes(d.bytes!)),
+                    if (d.pages != null) row('Pages', '${d.pages}'),
+                    if (d.locked)
+                      row('Pages', 'Password-protected — open it to see pages'),
+                    row('Modified', _dateTime(d.modified!)),
+                    row('Status', 'Available · stored privately in PDF Nova',
+                        color: c.success),
+                  ],
+                ],
+              );
+            },
           ),
         ),
       );

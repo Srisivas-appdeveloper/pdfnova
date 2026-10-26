@@ -19,8 +19,10 @@ import android.graphics.Typeface
 import android.graphics.drawable.Icon
 import android.media.MediaScannerConnection
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -30,6 +32,31 @@ class MainActivity : FlutterFragmentActivity() {
     private val CHANNEL = "pdfnova/widget_shortcut"
     private var initialToolId: String? = null
     private var methodChannel: MethodChannel? = null
+    private var systemSplash: android.window.SplashScreenView? = null
+    private var flutterFirstFrameShown = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // Android 12+ starts fading its launch screen as soon as the window
+        // draws, which can be before the Flutter surface shows anything — the
+        // mark blinked out for a few frames. Hold it until Dart reports its
+        // first frame (the identical mark) is up, then hand over.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            splashScreen.setOnExitAnimationListener { view ->
+                systemSplash = view
+                if (flutterFirstFrameShown) removeSystemSplash()
+                else view.postDelayed({ removeSystemSplash() }, 1000) // never strand it
+            }
+        }
+    }
+
+    private fun removeSystemSplash() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val view = systemSplash ?: return
+        systemSplash = null
+        // Short fade only hides sub-pixel differences between the two marks.
+        view.animate().alpha(0f).setDuration(120).withEndAction { view.remove() }.start()
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -58,6 +85,28 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // Screens with private content (the vault) hide themselves from the
+        // app switcher and block screenshots while they are shown.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "pdfnova/window")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "firstFrameShown") {
+                    runOnUiThread {
+                        flutterFirstFrameShown = true
+                        removeSystemSplash()
+                        result.success(true)
+                    }
+                } else if (call.method == "setSecure") {
+                    val on = call.argument<Boolean>("on") == true
+                    runOnUiThread {
+                        if (on) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        result.success(true)
+                    }
+                } else {
+                    result.notImplemented()
+                }
+            }
 
         // Quick note shared with the Home Screen widget — one source of truth.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "pdfnova/notes")

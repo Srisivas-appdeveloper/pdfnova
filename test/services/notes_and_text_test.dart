@@ -8,10 +8,12 @@ import '../helpers.dart';
 void main() {
   group('NotesStore', () {
     late MemoryNoteBackend backend;
+    late MemoryNoteVersionStore versions;
     late NotesStore store;
     setUp(() {
       backend = MemoryNoteBackend();
-      store = NotesStore(backend: backend);
+      versions = MemoryNoteVersionStore();
+      store = NotesStore(backend: backend, versions: versions);
     });
 
     test('saves when nobody else changed the note', () async {
@@ -28,6 +30,43 @@ void main() {
       expect(r.merged, isTrue);
       expect(r.note.text, contains('buy milk'));
       expect(r.note.text, contains('call the bank'));
+    });
+
+    test('a merge keeps the other edit as a recoverable version', () async {
+      final base = (await store.load()).updatedAt;
+      await backend.write('from widget');
+      await store.save('from app', baseVersion: base);
+      final v = await store.versions();
+      expect(v.first.text, 'from widget');
+    });
+
+    test('typing does not create a version on every keystroke', () async {
+      var base = (await store.load()).updatedAt;
+      for (final text in ['a', 'ab', 'abc', 'abcd']) {
+        base = (await store.save(text, baseVersion: base)).note.updatedAt;
+      }
+      // Memory clock advances by ms-scale steps: all within 5 minutes.
+      expect((await store.versions()).length, lessThanOrEqualTo(1));
+    });
+
+    test('restore brings back an old version and keeps the replaced text',
+        () async {
+      var base = (await store.load()).updatedAt;
+      base =
+          (await store.save('first draft', baseVersion: base)).note.updatedAt;
+      await backend.write('second draft'); // e.g. from the widget
+      const first = QuickNote('first draft', 1);
+      final restored = await store.restore(first);
+      expect(restored.text, 'first draft');
+      expect((await store.versions()).first.text, 'second draft');
+    });
+
+    test('keeps at most maxVersions', () async {
+      for (var i = 0; i < NotesStore.maxVersions + 5; i++) {
+        await backend.write('v$i');
+        await store.restore(QuickNote('r$i', 0));
+      }
+      expect((await store.versions()).length, NotesStore.maxVersions);
     });
 
     test('merge does not duplicate text that is already included', () {

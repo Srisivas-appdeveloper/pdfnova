@@ -4,6 +4,7 @@ import '../../core/widgets/nova_card.dart';
 import '../../core/widgets/nova_controls.dart';
 import '../../core/widgets/nova_entrance.dart';
 import '../../core/widgets/nova_mark.dart';
+import '../../services/document_index.dart';
 import '../../services/storage_service.dart';
 
 class SettingsTab extends StatelessWidget {
@@ -57,7 +58,11 @@ class SettingsTab extends StatelessWidget {
                       value: mode,
                       onChanged: storage.setThemeMode,
                       options: const [
-                        (ThemeMode.system, 'Auto', Icons.brightness_auto_outlined),
+                        (
+                          ThemeMode.system,
+                          'Auto',
+                          Icons.brightness_auto_outlined
+                        ),
                         (ThemeMode.light, 'Light', Icons.light_mode_outlined),
                         (ThemeMode.dark, 'Dark', Icons.dark_mode_outlined),
                       ],
@@ -83,6 +88,50 @@ class SettingsTab extends StatelessWidget {
             ),
           ),
           section(
+            'Search',
+            NovaCard(
+              padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+              child: ValueListenableBuilder<bool>(
+                valueListenable: storage.contentIndexing,
+                builder: (context, on, __) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      value: on,
+                      title: Text('Search inside files', style: t.titleMedium),
+                      subtitle: Text(
+                          'Lets Files find words inside PDFs you made with PDF Nova. The text is stored only on this phone; turning this off deletes it. Vault files are never included.',
+                          style: t.bodySmall),
+                      onChanged: (v) async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final n = await storage.setContentIndexing(v);
+                        messenger.showSnackBar(SnackBar(
+                            content: Text(v
+                                ? 'Indexed $n ${n == 1 ? 'PDF' : 'PDFs'} for search.'
+                                : 'Search index deleted.')));
+                      },
+                    ),
+                    if (on)
+                      TextButton.icon(
+                        icon: const Icon(Icons.refresh_rounded, size: 18),
+                        label: const Text('Rebuild index'),
+                        onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          await DocumentIndex.instance.clear();
+                          final r = await DocumentIndex.instance
+                              .sync(storage.history.map((h) => h.path));
+                          messenger.showSnackBar(SnackBar(
+                              content: Text(
+                                  'Rebuilt: ${r.indexed} ${r.indexed == 1 ? 'PDF' : 'PDFs'} indexed.')));
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          section(
             'Privacy',
             NovaCard(
               child: Column(
@@ -101,12 +150,18 @@ class SettingsTab extends StatelessWidget {
                   ]),
                   const SizedBox(height: 16),
                   for (final (icon, text) in const [
-                    (Icons.cloud_off_outlined,
-                        'Your files are never uploaded. Every tool works offline.'),
-                    (Icons.folder_outlined,
-                        'Results stay in the app until you save them to Download/PDFNova or share them.'),
-                    (Icons.wifi_tethering_rounded,
-                        'WiFi share only serves the file you pick, on your local network, while the screen is open.'),
+                    (
+                      Icons.cloud_off_outlined,
+                      'Your files are never uploaded. Every tool works offline.'
+                    ),
+                    (
+                      Icons.folder_outlined,
+                      'Results stay in the app until you save them to Download/PDFNova or share them.'
+                    ),
+                    (
+                      Icons.wifi_tethering_rounded,
+                      'WiFi share only serves the file you pick, on your local network, while the screen is open.'
+                    ),
                   ])
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),

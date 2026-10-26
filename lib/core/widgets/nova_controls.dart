@@ -290,22 +290,27 @@ class NovaChip extends StatelessWidget {
         duration: NovaMotion.quick,
         // 44pt minimum touch target (Apple HIG); keeps chips tappable.
         constraints: const BoxConstraints(minHeight: 44),
-        alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
           color: selected ? c.ink : c.surfaceAlt,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (icon != null) ...[
-            Icon(icon, size: 16, color: fg),
-            const SizedBox(width: 6),
-          ],
-          Text(label,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: fg,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
-        ]),
+        // widthFactor 1: centre vertically in the 44pt height but keep the
+        // chip as wide as its label (a plain `alignment` made chips stretch
+        // to full width inside a Wrap).
+        child: Align(
+          widthFactor: 1,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (icon != null) ...[
+              Icon(icon, size: 16, color: fg),
+              const SizedBox(width: 6),
+            ],
+            Text(label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: fg,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
+          ]),
+        ),
       ),
     );
   }

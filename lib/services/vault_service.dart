@@ -40,7 +40,7 @@ class VaultService {
   final Future<Directory> Function() _vaultDir;
   final Future<Directory> Function() _tempDir;
   final VaultKeyStore _keys;
-  SecretKey? _key;
+  Future<SecretKey>? _key;
 
   static Future<Directory> _defaultVaultDir() async {
     final dir = await getApplicationDocumentsDirectory();
@@ -54,10 +54,30 @@ class VaultService {
 
   // ---- Key ---------------------------------------------------------------
 
-  Future<SecretKey> _secretKey() async {
-    if (_key != null) return _key!;
-    final stored = await _keys.read();
-    if (stored != null) return _key = SecretKey(stored);
+  /// Loads (or, for an empty vault, creates) the key once. Memoised so two
+  /// concurrent first calls can never generate two different keys; a failed
+  /// load is not cached, so the next attempt retries.
+  Future<SecretKey> _secretKey() => _key ??= _loadKey()
+    ..catchError((Object _) {
+      _key = null;
+      return SecretKey(const []);
+    });
+
+  Future<SecretKey> _loadKey() async {
+    Uint8List? stored;
+    try {
+      stored = await _keys.read();
+    } catch (e) {
+      // Keystore/secure-storage failure (e.g. key invalidated by a device
+      // security change). Never fall through to creating a new key.
+      throw VaultKeyUnavailableException('$e');
+    }
+    if (stored != null) {
+      if (stored.length != 32) {
+        throw const VaultKeyUnavailableException('bad key length');
+      }
+      return SecretKey(stored);
+    }
     // No key. Only create one if there is nothing encrypted to orphan —
     // otherwise a fresh key would make existing files permanently unreadable.
     final dir = await _vaultDir();
@@ -68,11 +88,38 @@ class VaultService {
     final fresh = await _cipher.newSecretKey();
     final bytes = Uint8List.fromList(await fresh.extractBytes());
     await _keys.write(bytes);
-    return _key = fresh;
+    return fresh;
   }
 
   /// Forget the in-memory key (e.g. when the vault screen locks).
   void lock() => _key = null;
+
+  /// Removes debris a crash can leave: `*.tmp` files from interrupted
+  /// writes, and data blobs whose metadata was never written (an add that
+  /// never completed — its source file was never removed). Never touches a
+  /// complete entry or a legacy plain file.
+  Future<int> cleanupIncomplete() async {
+    final dir = await _vaultDir();
+    final files = dir.listSync().whereType<File>().toList();
+    final metas = {
+      for (final f in files)
+        if (f.path.endsWith(_metaExt))
+          f.path.substring(0, f.path.length - _metaExt.length)
+    };
+    var removed = 0;
+    for (final f in files) {
+      final p = f.path;
+      final orphanData = p.endsWith(_dataExt) &&
+          !metas.contains(p.substring(0, p.length - _dataExt.length));
+      if (p.endsWith('.tmp') || orphanData) {
+        try {
+          f.deleteSync();
+          removed++;
+        } catch (_) {}
+      }
+    }
+    return removed;
+  }
 
   // ---- Blob crypto -------------------------------------------------------
 
@@ -128,6 +175,7 @@ class VaultService {
   // ---- Public API --------------------------------------------------------
 
   Future<List<VaultEntry>> list() async {
+    await cleanupIncomplete();
     final dir = await _vaultDir();
     final entries = <VaultEntry>[];
     for (final f in dir.listSync().whereType<File>()) {
@@ -144,6 +192,8 @@ class VaultService {
           sha256: meta['sha256'] as String,
         ));
       } on VaultKeyMissingException {
+        rethrow;
+      } on VaultKeyUnavailableException {
         rethrow;
       } catch (_) {
         entries.add(VaultEntry.damaged(id));
@@ -163,19 +213,36 @@ class VaultService {
       addedAt: DateTime.now(),
       sha256: await _sha256(bytes),
     );
-    await _atomicWrite(
-        File('${dir.path}/$id$_dataExt'), await _seal(bytes, 'data', id));
-    await _atomicWrite(
-        File('${dir.path}/$id$_metaExt'),
-        await _seal(
-            utf8.encode(jsonEncode({
-              'name': entry.name,
-              'size': entry.size,
-              'addedAt': entry.addedAt.toIso8601String(),
-              'sha256': entry.sha256,
-            })),
-            'meta',
-            id));
+    final data = File('${dir.path}/$id$_dataExt');
+    final meta = File('${dir.path}/$id$_metaExt');
+    try {
+      await _atomicWrite(data, await _seal(bytes, 'data', id));
+      // Metadata last: an entry only "exists" once both parts are written.
+      await _atomicWrite(
+          meta,
+          await _seal(
+              utf8.encode(jsonEncode({
+                'name': entry.name,
+                'size': entry.size,
+                'addedAt': entry.addedAt.toIso8601String(),
+                'sha256': entry.sha256,
+              })),
+              'meta',
+              id));
+    } catch (_) {
+      // e.g. disk full: leave nothing half-written behind.
+      for (final f in [
+        data,
+        meta,
+        File('${data.path}.tmp'),
+        File('${meta.path}.tmp')
+      ]) {
+        try {
+          if (f.existsSync()) f.deleteSync();
+        } catch (_) {}
+      }
+      rethrow;
+    }
     return entry;
   }
 
@@ -239,11 +306,23 @@ class VaultService {
   /// failure leaves the original untouched and is reported.
   Future<VaultMigrationReport> migrateLegacy() async {
     final report = VaultMigrationReport();
+    final existing = await list();
     for (final f in await legacyFiles()) {
       final name = f.uri.pathSegments.last;
       VaultEntry? entry;
       try {
         final bytes = await f.readAsBytes();
+        final hash = await _sha256(bytes);
+        // Resuming after an interrupted run: an identical encrypted copy may
+        // already exist. Verify it and reuse it instead of duplicating.
+        final previous = existing
+            .where((e) => !e.damaged && e.name == name && e.sha256 == hash)
+            .firstOrNull;
+        if (previous != null && await _sha256(await read(previous)) == hash) {
+          await f.delete();
+          report.migrated.add(name);
+          continue;
+        }
         entry = await add(name, bytes);
         final back = await read(entry);
         if (await _sha256(back) != await _sha256(bytes)) {
@@ -298,6 +377,14 @@ class VaultCorruptException implements Exception {
   final String message;
   @override
   String toString() => message;
+}
+
+class VaultKeyUnavailableException implements Exception {
+  const VaultKeyUnavailableException(this.detail);
+  final String detail;
+  @override
+  String toString() =>
+      'The vault key could not be read from this phone\'s secure storage. Vault files have not been changed or deleted. Try again; if this keeps happening after a screen-lock change, the files may no longer be recoverable.';
 }
 
 class VaultKeyMissingException implements Exception {

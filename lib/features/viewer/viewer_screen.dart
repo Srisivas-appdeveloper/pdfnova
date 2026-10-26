@@ -18,8 +18,15 @@ import '../home/tools.dart';
 /// Reader: PDFium-rendered viewer with night mode and human-like multilingual
 /// text-to-speech supporting Tamil, Hindi, English, Telugu, Malayalam, Kannada & more.
 class ViewerScreen extends StatefulWidget {
-  const ViewerScreen({super.key, required this.tool});
+  const ViewerScreen(
+      {super.key, required this.tool, this.initialPath, this.initialPage = 1});
   final Tool tool;
+
+  /// Open this file directly (e.g. from a content-search hit)…
+  final String? initialPath;
+
+  /// …at this 1-based page.
+  final int initialPage;
 
   @override
   State<ViewerScreen> createState() => _ViewerScreenState();
@@ -54,6 +61,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
   @override
   void initState() {
     super.initState();
+    final path = widget.initialPath;
+    if (path != null && File(path).existsSync()) {
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _open(File(path).readAsBytesSync(), page: widget.initialPage));
+    }
     _initTts();
   }
 
@@ -88,10 +100,15 @@ class _ViewerScreenState extends State<ViewerScreen> {
   Future<void> _pick() async {
     final picked = await FileService.instance.pickPdfs();
     if (picked.isEmpty) return;
-    _bytes = picked.first.bytes;
+    _open(picked.first.bytes);
+  }
+
+  void _open(Uint8List bytes, {int page = 1}) {
+    _bytes = bytes;
     setState(() {
+      _page = page;
       _controller = px.PdfControllerPinch(
-          document: px.PdfDocument.openData(_bytes!));
+          document: px.PdfDocument.openData(bytes), initialPage: page);
     });
   }
 
@@ -106,11 +123,13 @@ class _ViewerScreenState extends State<ViewerScreen> {
     if (RegExp(r'[\u0C80-\u0CFF]').hasMatch(text)) return 'kn-IN'; // Kannada
     if (RegExp(r'[\u0980-\u09FF]').hasMatch(text)) return 'bn-IN'; // Bengali
     if (RegExp(r'[\u0A80-\u0AFF]').hasMatch(text)) return 'gu-IN'; // Gujarati
-    if (RegExp(r'[\u0600-\u06FF]').hasMatch(text)) return 'ar';    // Arabic
+    if (RegExp(r'[\u0600-\u06FF]').hasMatch(text)) return 'ar'; // Arabic
     if (RegExp(r'[\u4E00-\u9FFF]').hasMatch(text)) return 'zh-CN'; // Chinese
     if (RegExp(r'[\u3040-\u30FF]').hasMatch(text)) return 'ja-JP'; // Japanese
     if (RegExp(r'[\u0400-\u04FF]').hasMatch(text)) return 'ru-RU'; // Russian
-    if (RegExp(r'[áéíóúñ¿¡]', caseSensitive: false).hasMatch(text)) return 'es-ES'; // Spanish
+    if (RegExp(r'[áéíóúñ¿¡]', caseSensitive: false).hasMatch(text)) {
+      return 'es-ES'; // Spanish
+    }
     return 'en-IN'; // Default English
   }
 

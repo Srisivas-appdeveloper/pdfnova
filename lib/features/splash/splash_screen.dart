@@ -5,12 +5,13 @@ import '../../core/widgets/nova_background.dart';
 import '../../core/widgets/nova_mark.dart';
 import '../home/home_shell.dart';
 
-/// Opening moment, ~1.9s (tap anywhere to skip):
-///   1. the artwork settles from a slow 1.12× zoom (Ken Burns),
-///   2. the mark draws itself: page outline → fold → the star blooms,
+/// Opening moment, ~1.9s (tap anywhere to skip). It starts as an exact
+/// copy of Android's launch screen (same mark, size and position), then:
+///   1. the artwork fades in and settles from a slow 1.12× zoom,
+///   2. the mark glides up and shrinks into place,
 ///   3. "PDF Nova" rises out of a mask, the tagline fades in,
-///   4. hand-over: the artwork flies up into the home header (Hero) while
-///      home fades in underneath.
+///   4. the foreground fades out and the artwork flies up into the home
+///      header (Hero) while Home fades in.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -28,10 +29,26 @@ class _SplashScreenState extends State<SplashScreen>
           [Curve curve = NovaMotion.emphasized]) =>
       CurvedAnimation(parent: _c, curve: Interval(a, b, curve: curve));
 
+  // Timeline (fractions of NovaMotion.splash):
+  //   0.00–0.20  hold: identical to Android's launch screen, which fades
+  //              out over ~200ms after our first frame (measured) — moving
+  //              earlier showed two marks at once
+  //   0.18–0.50  artwork fades in from the plain canvas, slow zoom settles
+  //   0.20–0.54  the mark glides up and shrinks to its place
+  //   0.42–0.72  "PDF Nova" rises out of a clip; 0.55–0.82 tagline fades in
+  //   0.86–1.00  foreground fades out, so nothing ghosts over Home
   late final _zoom = _span(0, 1, Curves.easeOutCubic);
-  late final _mark = _span(0.05, 0.62, Curves.linear);
-  late final _word = _span(0.38, 0.72);
-  late final _tag = _span(0.55, 0.85);
+  late final _artIn = _span(0.18, 0.50, Curves.easeOut);
+  late final _settle = _span(0.20, 0.54);
+  late final _word = _span(0.42, 0.72);
+  late final _tag = _span(0.55, 0.82);
+  late final _out = _span(0.86, 1.0, Curves.easeIn);
+
+  /// Size of NovaMark that matches the Android 12+ system splash icon
+  /// (measured on device: the adaptive-icon foreground shown at screen
+  /// centre), so the hand-off from the system splash has no jump.
+  static const _systemMarkSize = 131.0;
+  static const _markSize = 76.0;
 
   bool _started = false;
 
@@ -75,44 +92,64 @@ class _SplashScreenState extends State<SplashScreen>
   Widget build(BuildContext context) {
     final c = context.nova;
     final t = Theme.of(context).textTheme;
+    final screen = MediaQuery.sizeOf(context);
+    final center = screen.height / 2;
+    // Final layout: mark above centre, wordmark + tagline below it.
+    const markGap = 26.0;
+    final finalMarkCenter = center - 52;
     return GestureDetector(
       onTap: _go,
       child: Scaffold(
         backgroundColor: c.canvas,
-        body: Stack(fit: StackFit.expand, children: [
-          AnimatedBuilder(
-            animation: _zoom,
-            builder: (_, child) =>
-                Transform.scale(scale: 1.12 - 0.12 * _zoom.value, child: child),
-            child: const NovaArt(fade: false),
-          ),
-          Center(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              AnimatedBuilder(
-                animation: _mark,
-                builder: (_, __) => NovaMark(size: 76, progress: _mark.value),
-              ),
-              const SizedBox(height: 26),
-              // Wordmark rises out of a clip, like type set into a page.
-              ClipRect(
-                child: AnimatedBuilder(
-                  animation: _word,
-                  builder: (_, child) => FractionalTranslation(
-                    translation: Offset(0, 1 - _word.value),
-                    child: Opacity(opacity: _word.value, child: child),
-                  ),
-                  child: Text('PDF Nova', style: t.displayMedium),
+        body: AnimatedBuilder(
+          animation: _c,
+          builder: (context, _) {
+            final s = _settle.value;
+            final size = _systemMarkSize + (_markSize - _systemMarkSize) * s;
+            final markCenter = center + (finalMarkCenter - center) * s;
+            final fg = 1 - _out.value;
+            return Stack(fit: StackFit.expand, children: [
+              Opacity(
+                opacity: _artIn.value,
+                child: Transform.scale(
+                  scale: 1.12 - 0.12 * _zoom.value,
+                  child: const NovaArt(fade: false),
                 ),
               ),
-              const SizedBox(height: 10),
-              FadeTransition(
-                opacity: _tag,
-                child: Text('Your documents. Your phone.',
-                    style: t.bodyMedium?.copyWith(color: c.inkMid)),
+              Positioned(
+                left: (screen.width - size) / 2,
+                top: markCenter - size / 2,
+                child: Opacity(opacity: fg, child: NovaMark(size: size)),
               ),
-            ]),
-          ),
-        ]),
+              Positioned(
+                left: 24,
+                right: 24,
+                top: finalMarkCenter + _markSize / 2 + markGap,
+                child: Opacity(
+                  opacity: fg,
+                  child: Column(children: [
+                    // Wordmark rises out of a clip, like type set into a page.
+                    ClipRect(
+                      child: FractionalTranslation(
+                        translation: Offset(0, 1 - _word.value),
+                        child: Opacity(
+                          opacity: _word.value,
+                          child: Text('PDF Nova', style: t.displayMedium),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Opacity(
+                      opacity: _tag.value,
+                      child: Text('Your documents. Your phone.',
+                          style: t.bodyMedium?.copyWith(color: c.inkMid)),
+                    ),
+                  ]),
+                ),
+              ),
+            ]);
+          },
+        ),
       ),
     );
   }

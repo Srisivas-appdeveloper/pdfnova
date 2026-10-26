@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdfx/pdfx.dart' as px;
+import 'tool_errors.dart';
 
 /// Renders PDF pages to bitmaps via PDFium (pdfx). Used by: page thumbnails,
 /// PDF→Images, fit-to-size compression, OCR, signature preview.
@@ -24,7 +25,9 @@ class RasterService {
             height: page.height * scale,
             format: px.PdfPageImageFormat.png,
           );
-          if (img != null) out.add(img.bytes);
+          // Never drop a page silently: callers rely on one image per page.
+          if (img == null) throw StateError('Page $i could not be rendered');
+          out.add(img.bytes);
         } finally {
           await page.close();
         }
@@ -77,15 +80,25 @@ class RasterService {
       final decoded = img.decodePng(pngBytes);
       Uint8List finalBytes;
       if (decoded != null) {
-        final whiteCanvas = img.Image(width: decoded.width, height: decoded.height);
+        final whiteCanvas =
+            img.Image(width: decoded.width, height: decoded.height);
         img.fill(whiteCanvas, color: img.ColorRgb8(255, 255, 255));
         img.compositeImage(whiteCanvas, decoded);
-        finalBytes = Uint8List.fromList(img.encodeJpg(whiteCanvas, quality: 92));
+        finalBytes =
+            Uint8List.fromList(img.encodeJpg(whiteCanvas, quality: 92));
       } else {
         finalBytes = pngBytes;
       }
       final path = '${folder.path}/${prefix}_${i + 1}.jpg';
-      await File(path).writeAsBytes(finalBytes, flush: true);
+      try {
+        await writeAtomic(path, finalBytes);
+      } catch (_) {
+        // Don't leave a half-finished image set behind.
+        try {
+          folder.deleteSync(recursive: true);
+        } catch (_) {}
+        rethrow;
+      }
       paths.add(path);
     }
     return paths;

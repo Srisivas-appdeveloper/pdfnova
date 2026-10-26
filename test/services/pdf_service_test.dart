@@ -145,29 +145,17 @@ void main() {
   });
 
   group('forms', () {
-    Uint8List form() {
-      final doc = PdfDocument();
-      final page = doc.pages.add();
-      doc.form.fields.add(PdfTextBoxField(
-          page, 'full_name', const Rect.fromLTWH(40, 40, 200, 24)));
-      doc.form.fields.add(PdfTextBoxField(
-          page, 'city', const Rect.fromLTWH(40, 80, 200, 24),
-          text: 'Chennai'));
-      final b = Uint8List.fromList(doc.saveSync());
-      doc.dispose();
-      return b;
-    }
-
     test('lists text fields with current values', () {
-      final fields = pdf.listFormFields(form());
-      expect(fields.map((f) => f.$2), ['full_name', 'city']);
+      final fields = pdf.listFormFields(formPdf());
+      expect(fields.map((f) => f.$2), ['Full name', 'City'],
+          reason: 'internal names are shown readably');
       expect(fields[1].$3, 'Chennai');
     });
 
     test('fills fields and keeps them editable when not flattened', () async {
       final out = PdfDocument(
           inputBytes: readBytes(
-              (await pdf.fillForm(form(), {0: 'Asha'}, false)).single));
+              (await pdf.fillForm(formPdf(), {0: 'Asha'}, false)).single));
       expect((out.form.fields[0] as PdfTextBoxField).text, 'Asha');
       expect((out.form.fields[1] as PdfTextBoxField).text, 'Chennai');
       out.dispose();
@@ -175,7 +163,7 @@ void main() {
 
     test('flattening turns values into page text', () async {
       final bytes =
-          readBytes((await pdf.fillForm(form(), {0: 'Asha'}, true)).single);
+          readBytes((await pdf.fillForm(formPdf(), {0: 'Asha'}, true)).single);
       expect(textOf(bytes), contains('Asha'));
     });
   });

@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../services/storage_service.dart';
+import '../../services/tool_errors.dart';
 import '../../services/tool_notes.dart';
 
 export '../../services/tool_notes.dart';
@@ -13,9 +14,10 @@ sealed class ToolEvent extends Equatable {
   List<Object?> get props => [];
 }
 
-/// Runs [task] (the actual work, returning one or more output file paths)
-/// with a smooth progress ramp: 0→90% eased while the real work runs, snap
-/// to 100% on completion. The wait shown is always the real wait.
+/// Runs [task] (the actual work, returning one or more output file paths).
+/// Progress is only what the task actually reports via [ToolProgress];
+/// otherwise the UI shows an indeterminate indicator — never an invented
+/// percentage.
 class ToolStarted extends ToolEvent {
   const ToolStarted(this.tool, this.task);
   final Tool tool;
@@ -36,10 +38,15 @@ class ToolIdle extends ToolState {
 }
 
 class ToolProcessing extends ToolState {
-  const ToolProcessing(this.progress);
-  final double progress;
+  const ToolProcessing(this.progress, {this.stage});
+
+  /// 0–1 when the task measures it; null while the amount is unknown.
+  final double? progress;
+
+  /// Optional stage label, e.g. "File 2 of 5".
+  final String? stage;
   @override
-  List<Object?> get props => [progress];
+  List<Object?> get props => [progress, stage];
 }
 
 class ToolSuccess extends ToolState {
@@ -67,30 +74,18 @@ class ToolBloc extends Bloc<ToolEvent, ToolState> {
   }
 
   Future<void> _run(ToolStarted e, Emitter<ToolState> emit) async {
-    emit(const ToolProcessing(0));
+    emit(const ToolProcessing(null));
     try {
-      var done = false;
       final notes = <String>[];
-      final work =
-          ToolNotes.collect(notes, e.task).whenComplete(() => done = true);
-      // The task may fail while the ramp below is still waiting; without a
-      // listener that error would be reported as unhandled before the
-      // `await work` further down catches it. ignore() only marks it as
-      // observed — awaiting still rethrows.
-      work.ignore();
-
-      var p = 0.0;
-      while (!done && p < 0.9) {
-        await Future.delayed(const Duration(milliseconds: 90));
-        p += (0.9 - p) * 0.06;
-        if (!done && !isClosed) emit(ToolProcessing(p));
-      }
-      final paths = await work;
-      if (isClosed) return;
-      emit(const ToolProcessing(1));
-      await Future.delayed(const Duration(milliseconds: 350));
+      final paths = await ToolNotes.collect(
+        notes,
+        () => ToolProgress.track((fraction, stage) {
+          if (!isClosed) emit(ToolProcessing(fraction, stage: stage));
+        }, e.task),
+      );
       if (isClosed) return;
       if (paths.isEmpty) {
+        // Cancelled (e.g. the scanner was closed) — back to the input.
         emit(const ToolIdle());
         return;
       }
@@ -99,13 +94,8 @@ class ToolBloc extends Bloc<ToolEvent, ToolState> {
       emit(ToolSuccess(paths, notes: notes));
     } catch (err) {
       if (isClosed) return;
-      final text = err.toString();
-      final msg = text.contains('password')
-          ? 'That password did not open this PDF. Check the name spelling and year, then try again.'
-          : text.contains('NoText')
-              ? 'No readable text was found in this PDF.'
-              : 'Something went wrong while processing. The file may be corrupted — try another copy.';
-      emit(ToolFailure(msg));
+      emit(ToolFailure(
+          describeToolError(err, isUnlockTool: e.tool.id == ToolId.unlock)));
     }
   }
 }

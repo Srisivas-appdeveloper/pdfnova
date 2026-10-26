@@ -39,6 +39,10 @@ class NovaCard extends StatelessWidget {
     final surface = Material(
       color: color ?? (sunken ? c.surfaceAlt : c.surface),
       shape: shape,
+      // Material otherwise runs its own 200ms shape/colour animation, so on a
+      // theme switch card borders lagged the app's cross-fade (white outlines
+      // flashed on dark cards). Follow the theme animation exactly instead.
+      animationDuration: Duration.zero,
       clipBehavior: Clip.antiAlias,
       child: onTap == null && onLongPress == null
           ? Padding(padding: padding, child: child)

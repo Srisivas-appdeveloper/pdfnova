@@ -4,6 +4,7 @@ import 'package:hive/hive.dart';
 import 'package:pdfnova/features/files/file_row.dart';
 import 'package:pdfnova/features/files/files_tab.dart';
 import 'package:pdfnova/services/file_service.dart';
+import 'package:pdfnova/services/pdf_service.dart';
 import 'package:pdfnova/services/storage_service.dart';
 import '../helpers.dart';
 
@@ -132,6 +133,31 @@ void main() {
       final outside = File('${sandbox.root.path}/x.pdf')..writeAsBytesSync([1]);
       await expectLater(
           files.renameOutput(outside.path, 'y'), throwsArgumentError);
+    });
+  });
+
+  group('file details', () {
+    test('reads size and page count; missing files say so', () async {
+      final f = output('two.pdf')..writeAsBytesSync(samplePdf(2));
+      final d = await FileDetails.read(f.path);
+      expect(d.exists, isTrue);
+      expect(d.pages, 2);
+      expect(d.bytes, f.lengthSync());
+      expect((await FileDetails.read('/nope/x.pdf')).exists, isFalse);
+    });
+
+    test('password-protected PDFs are reported as locked', () async {
+      final locked = await PdfService.instance.protect(samplePdf(1), 'pw');
+      final d = await FileDetails.read(locked.single);
+      expect(d.locked, isTrue);
+      expect(d.pages, isNull);
+    });
+
+    test('non-PDF files have no page count', () async {
+      final f = output('n.txt')..writeAsStringSync('hello');
+      final d = await FileDetails.read(f.path);
+      expect(d.pages, isNull);
+      expect(d.bytes, 5);
     });
   });
 

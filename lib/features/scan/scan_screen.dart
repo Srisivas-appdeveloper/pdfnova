@@ -11,6 +11,8 @@ import '../../core/widgets/nova_controls.dart';
 import '../../core/widgets/nova_entrance.dart';
 import '../home/tools.dart';
 import '../tool/tool_bloc.dart';
+import '../tool/tool_stages.dart';
+import '../../services/pdf_service.dart';
 import '../tool/processing_view.dart';
 import '../tool/success_view.dart';
 
@@ -58,10 +60,15 @@ class _ScanScreenState extends State<ScanScreen> {
         // Use Uri.parse().toFilePath() — handles both file:// and raw paths
         final srcPath = Uri.parse(srcUri).toFilePath();
         final dir = await getApplicationDocumentsDirectory();
-        final out = Directory('${dir.path}/PDFNova')..createSync(recursive: true);
+        final out = Directory('${dir.path}/PDFNova')
+          ..createSync(recursive: true);
         final dest =
             '${out.path}/scan_${DateTime.now().millisecondsSinceEpoch}.pdf';
-        await File(srcPath).copy(dest);
+        // Copy via a temp name, then verify, so a failed copy never
+        // leaves a broken PDF in the output folder.
+        await File(srcPath).copy('$dest.part');
+        await File('$dest.part').rename(dest);
+        PdfService.verifyPdf(File(dest).readAsBytesSync());
         return [dest];
       } catch (e) {
         if (e is PlatformException) {
@@ -91,7 +98,7 @@ class _ScanScreenState extends State<ScanScreen> {
             // or a silent pop.
             if (state is ToolFailure) {
               ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text(state.message)));
+                  .showSnackBar(toolSnack(context, state.message));
               setState(() => _cancelled = true);
             }
             if (state is ToolIdle) setState(() => _cancelled = true);
@@ -133,7 +140,7 @@ class _ScanScreenState extends State<ScanScreen> {
               // PDF is being copied the real progress shows.
               stage = ProcessingView(
                 key: const ValueKey('p'),
-                progress: state is ToolProcessing ? state.progress : 0.0,
+                progress: state is ToolProcessing ? state.progress : null,
                 label: 'Scanner open — capture your pages',
               );
             }
